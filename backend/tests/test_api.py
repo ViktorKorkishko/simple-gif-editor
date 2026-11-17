@@ -97,3 +97,60 @@ def test_convert_trim_on_garbage(client):
     resp = client.post("/api/convert", files={"file": ("x.mp4", b"nope")}, data={"start": "1"})
     assert resp.status_code == 422
     assert "Could not read video" in resp.json()["detail"]
+
+
+def test_convert_with_text(client, long_video: Path):
+    resp = post_trim(
+        client,
+        long_video,
+        start=1,
+        end=3,
+        text="Привіт!",
+        text_size=20,
+        text_color="#ffcc00",
+        text_position="top-left",
+        text_box="true",
+        text_start=0.5,
+        text_end=1.5,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.content[:6] == b"GIF89a"
+
+
+def test_convert_with_text_at_offset(client, sample_video: Path):
+    resp = post_trim(client, sample_video, text="hi", text_x=5, text_y=5, text_outline=0)
+    assert resp.status_code == 200, resp.text
+
+
+def test_convert_ignores_blank_text(client, sample_video: Path):
+    resp = post_trim(client, sample_video, text="  ", text_x=5)
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.parametrize(
+    "fields, message",
+    [
+        ({"text_color": "red:x=0"}, "text color"),
+        ({"text_box_color": "black@3"}, "box color"),
+        ({"text_x": 10}, "both x and y"),
+        ({"text_start": 2, "text_end": 1}, "text end must be greater"),
+    ],
+)
+def test_convert_rejects_bad_text_options(client, sample_video: Path, fields, message):
+    resp = post_trim(client, sample_video, text="hi", **fields)
+    assert resp.status_code == 422
+    assert message in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"text_position": "left"},
+        {"text_size": 1},
+        {"text_outline": 50},
+        {"text": "x" * 501},
+    ],
+)
+def test_convert_rejects_out_of_range_text_fields(client, sample_video: Path, fields):
+    resp = post_trim(client, sample_video, **{"text": "hi", **fields})
+    assert resp.status_code == 422
