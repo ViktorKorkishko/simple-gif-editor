@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+npm-debug.log*
+
+# Секрети та локальні налаштування
+.env
+.env.*
+!.env.example
+
+# Медіа: завантажені відео та згенеровані GIF
+uploads/
+outputs/
+tmp/
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.gif
+!docs/**/*.gif
+!backend/tests/fixtures/**
+
+# IDE та ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
