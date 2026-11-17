@@ -1,0 +1,11 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      MAX_UPLOAD_MB: "100"
+      FFMPEG_TIMEOUT_S: "120"
+    restart: unless-stopped
