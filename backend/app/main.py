@@ -17,8 +17,10 @@ from app.converter import (
     MIN_WIDTH,
     ConversionError,
     GifOptions,
+    TrimRange,
     convert_to_gif,
 )
+from app.probe import ProbeError, probe_duration
 
 app = FastAPI(title="Simple GIF Editor", version="0.1.0")
 
@@ -39,13 +41,31 @@ def convert(
     file: Annotated[UploadFile, File(description="Video file (mp4, mov, webm, ...)")],
     fps: Annotated[int, Form(ge=MIN_FPS, le=MAX_FPS)] = 10,
     width: Annotated[int, Form(ge=MIN_WIDTH, le=MAX_WIDTH)] = 480,
+    start: Annotated[
+        float | None, Form(ge=0, description="Where the GIF starts, in seconds")
+    ] = None,
+    end: Annotated[
+        float | None,
+        Form(gt=0, description="Where the GIF ends, in seconds. Mutually exclusive with duration"),
+    ] = None,
+    duration: Annotated[
+        float | None,
+        Form(gt=0, description="Length of the GIF, in seconds. Mutually exclusive with end"),
+    ] = None,
 ) -> FileResponse:
+    try:
+        trim = TrimRange(start=start or 0.0, end=end, duration=duration)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     workdir = Path(tempfile.mkdtemp(prefix="gif-"))
     cleanup = BackgroundTask(shutil.rmtree, workdir, ignore_errors=True)
     try:
         src = workdir / "input"
         _save_upload(file, src)
-        dst = convert_to_gif(src, workdir / "output.gif", GifOptions(fps=fps, width=width))
+        if not trim.is_full:
+            _check_trim_fits(src, trim)
+        dst = convert_to_gif(src, workdir / "output.gif", GifOptions(fps=fps, width=width), trim)
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
@@ -55,6 +75,17 @@ def convert(
 
     stem = Path(file.filename or "video").stem or "video"
     return FileResponse(dst, media_type="image/gif", filename=f"{stem}.gif", background=cleanup)
+
+
+def _check_trim_fits(src: Path, trim: TrimRange) -> None:
+    try:
+        video_duration = probe_duration(src)
+    except ProbeError as exc:
+        raise HTTPException(status_code=422, detail=f"Could not read video: {exc}") from exc
+    try:
+        trim.check_within(video_duration)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _save_upload(upload: UploadFile, dst: Path) -> None:
