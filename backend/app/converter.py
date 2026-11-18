@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import settings
+from app.overlay import TextOverlay
 
 MIN_FPS, MAX_FPS = 1, 30
 MIN_WIDTH, MAX_WIDTH = 16, 1920
@@ -86,16 +87,22 @@ class TrimRange:
             )
 
 
-def build_filtergraph(options: GifOptions) -> str:
+def build_filtergraph(options: GifOptions, text_filter: str | None = None) -> str:
     """Single-pass palettegen/paletteuse graph.
 
     The video is split in two: one branch builds an optimal 256-colour palette
     for the whole clip, the other is mapped onto it. This gives far better
     colours than FFmpeg's default GIF palette.
+
+    ``text_filter`` (a drawtext filter) runs after scaling, so font sizes and
+    offsets are in output pixels, and before palettegen, so the palette has
+    the text colours.
     """
+    text = f"{text_filter}," if text_filter else ""
     return (
         f"fps={options.fps},"
         f"scale={options.width}:-1:flags=lanczos,"
+        f"{text}"
         "split[a][b];"
         "[a]palettegen=stats_mode=diff[p];"
         "[b][p]paletteuse=dither=sierra2_4a"
@@ -103,7 +110,11 @@ def build_filtergraph(options: GifOptions) -> str:
 
 
 def build_command(
-    src: Path, dst: Path, options: GifOptions, trim: TrimRange | None = None
+    src: Path,
+    dst: Path,
+    options: GifOptions,
+    trim: TrimRange | None = None,
+    text_filter: str | None = None,
 ) -> list[str]:
     command = [settings.ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y"]
     # -ss before -i seeks in the input; since the video is re-encoded, the cut is
@@ -116,7 +127,7 @@ def build_command(
     return [
         *command,
         "-filter_complex",
-        build_filtergraph(options),
+        build_filtergraph(options, text_filter),
         "-loop",
         "0",
         str(dst),
@@ -128,11 +139,16 @@ def convert_to_gif(
     dst: Path,
     options: GifOptions | None = None,
     trim: TrimRange | None = None,
+    overlay: TextOverlay | None = None,
 ) -> Path:
     options = options or GifOptions()
+    text_filter = None
+    if overlay is not None:
+        text_file = overlay.write_text_file(dst.with_name(f"{dst.stem}-text.txt"))
+        text_filter = overlay.to_filter(text_file, settings.font_file)
     try:
         result = subprocess.run(
-            build_command(src, dst, options, trim),
+            build_command(src, dst, options, trim, text_filter),
             capture_output=True,
             text=True,
             timeout=settings.ffmpeg_timeout_s,
