@@ -154,3 +154,82 @@ def test_convert_rejects_bad_text_options(client, sample_video: Path, fields, me
 def test_convert_rejects_out_of_range_text_fields(client, sample_video: Path, fields):
     resp = post_trim(client, sample_video, **{"text": "hi", **fields})
     assert resp.status_code == 422
+
+
+def post_form(client, endpoint: str, video: Path, **fields):
+    with video.open("rb") as f:
+        return client.post(
+            endpoint,
+            files={"file": ("clip.mp4", f, "video/mp4")},
+            data={k: str(v) for k, v in fields.items()},
+        )
+
+
+def test_presets_endpoint(client):
+    presets = client.get("/api/presets").json()
+    assert set(presets) == {"high", "medium", "low"}
+    assert presets["low"]["width"] < presets["high"]["width"]
+
+
+def test_convert_with_preset_reports_settings(client, sample_video: Path):
+    resp = post_form(client, "/api/convert", sample_video, preset="low", width=100)
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["x-gif-width"] == "100"
+    assert resp.headers["x-gif-fps"] == "8"
+    assert resp.headers["x-gif-colors"] == "64"
+    assert int.from_bytes(resp.content[6:8], "little") == 100
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"preset": "ultra"}, {"colors": 1}, {"lossy": 500}, {"target_size_kb": 1}],
+)
+def test_convert_rejects_bad_compression_fields(client, sample_video: Path, fields):
+    assert post_form(client, "/api/convert", sample_video, **fields).status_code == 422
+
+
+def test_convert_to_target_size(client, sampled_video: Path):
+    resp = post_form(client, "/api/convert", sampled_video, width=160, target_size_kb=100)
+    assert resp.status_code == 200, resp.text
+    assert len(resp.content) <= 100 * 1024
+    assert int(resp.headers["x-gif-width"]) <= 160
+
+
+def test_convert_to_unreachable_target(client, sampled_video: Path):
+    resp = post_form(client, "/api/convert", sampled_video, target_size_kb=10)
+    assert resp.status_code == 422
+    assert "cannot fit the GIF into 10 KB" in resp.json()["detail"]
+
+
+def test_estimate_matches_conversion(client, long_video: Path):
+    est = post_form(client, "/api/estimate", long_video, preset="medium", start=1, end=3)
+    assert est.status_code == 200, est.text
+    body = est.json()
+    assert body["exact"] is True
+    assert body["duration"] == pytest.approx(2.0)
+    assert body["settings"]["colors"] == 128
+    gif = post_form(client, "/api/convert", long_video, preset="medium", start=1, end=3)
+    assert body["estimated_bytes"] == len(gif.content)
+
+
+def test_estimate_samples_long_clip(client, sampled_video: Path):
+    body = post_form(client, "/api/estimate", sampled_video, width=120).json()
+    assert body["exact"] is False
+    assert body["duration"] == pytest.approx(8.0, abs=0.1)
+    assert body["estimated_bytes"] > 0
+
+
+def test_estimate_with_target_picks_settings(client, sampled_video: Path):
+    body = post_form(client, "/api/estimate", sampled_video, width=160, target_size_kb=100).json()
+    assert body["estimated_bytes"] <= 100 * 1024
+    assert body["settings"]["width"] <= 160
+
+
+@pytest.mark.parametrize("fields", [{"start": 10}, {"colors": 0}])
+def test_estimate_rejects_bad_fields(client, long_video: Path, fields):
+    assert post_form(client, "/api/estimate", long_video, **fields).status_code == 422
+
+
+def test_estimate_rejects_garbage(client):
+    resp = client.post("/api/estimate", files={"file": ("x.mp4", b"nope")})
+    assert resp.status_code == 422
