@@ -2,23 +2,37 @@
 
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
+from app.compression import PRESETS, CompressionPreset, resolve_options
 from app.config import settings
 from app.converter import (
+    MAX_COLORS,
     MAX_FPS,
+    MAX_LOSSY,
     MAX_WIDTH,
+    MIN_COLORS,
     MIN_FPS,
+    MIN_LOSSY,
     MIN_WIDTH,
     ConversionError,
     GifOptions,
     TrimRange,
     convert_to_gif,
+)
+from app.estimate import (
+    Clip,
+    TargetUnreachableError,
+    convert_to_target,
+    estimate_size,
+    fit_to_target,
 )
 from app.overlay import (
     MAX_FONT_SIZE,
@@ -34,6 +48,32 @@ from app.probe import ProbeError, probe_duration
 app = FastAPI(title="Simple GIF Editor", version="0.1.0")
 
 CHUNK = 1024 * 1024
+MIN_TARGET_KB = 10
+
+
+class GifSettings(BaseModel):
+    fps: int
+    width: int
+    colors: int
+    lossy: int
+    dither: str
+
+    @classmethod
+    def of(cls, options: GifOptions) -> "GifSettings":
+        return cls(
+            fps=options.fps,
+            width=options.width,
+            colors=options.colors,
+            lossy=options.lossy,
+            dither=options.dither.value,
+        )
+
+
+class SizeEstimateResponse(BaseModel):
+    estimated_bytes: int
+    duration: float
+    exact: bool
+    settings: GifSettings
 
 
 @app.get("/health")
@@ -41,15 +81,49 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post(
-    "/api/convert",
-    response_class=FileResponse,
-    responses={200: {"content": {"image/gif": {}}}},
-)
-def convert(
-    file: Annotated[UploadFile, File(description="Video file (mp4, mov, webm, ...)")],
-    fps: Annotated[int, Form(ge=MIN_FPS, le=MAX_FPS)] = 10,
-    width: Annotated[int, Form(ge=MIN_WIDTH, le=MAX_WIDTH)] = 480,
+@dataclass(frozen=True)
+class ConversionParams:
+    """Everything about a conversion except the uploaded file."""
+
+    options: GifOptions
+    trim: TrimRange
+    overlay: TextOverlay | None
+    target_bytes: int | None
+
+
+def conversion_params(
+    preset: Annotated[
+        CompressionPreset | None,
+        Form(description="Compression preset; fps, width, colors and lossy override it"),
+    ] = None,
+    fps: Annotated[
+        int | None, Form(ge=MIN_FPS, le=MAX_FPS, description="Frames per second (default 10)")
+    ] = None,
+    width: Annotated[
+        int | None,
+        Form(
+            ge=MIN_WIDTH,
+            le=MAX_WIDTH,
+            description="Width in px; height keeps the aspect ratio (default 480)",
+        ),
+    ] = None,
+    colors: Annotated[
+        int | None,
+        Form(ge=MIN_COLORS, le=MAX_COLORS, description="Palette size (default 256)"),
+    ] = None,
+    lossy: Annotated[
+        int | None,
+        Form(
+            ge=MIN_LOSSY, le=MAX_LOSSY, description="gifsicle lossy level, 0 for none (default 0)"
+        ),
+    ] = None,
+    target_size_kb: Annotated[
+        int | None,
+        Form(
+            ge=MIN_TARGET_KB,
+            description="Largest allowed GIF size in KB; settings are lowered until it fits",
+        ),
+    ] = None,
     start: Annotated[
         float | None, Form(ge=0, description="Where the GIF starts, in seconds")
     ] = None,
@@ -101,8 +175,9 @@ def convert(
         float | None,
         Form(gt=0, description="When the text disappears, in seconds from the start of the GIF"),
     ] = None,
-) -> FileResponse:
+) -> ConversionParams:
     try:
+        options = resolve_options(preset, fps=fps, width=width, colors=colors, lossy=lossy)
         trim = TrimRange(start=start or 0.0, end=end, duration=duration)
         overlay = None
         if text and text.strip():
@@ -122,37 +197,119 @@ def convert(
             )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ConversionParams(
+        options=options,
+        trim=trim,
+        overlay=overlay,
+        target_bytes=None if target_size_kb is None else target_size_kb * 1024,
+    )
 
+
+Params = Annotated[ConversionParams, Depends(conversion_params)]
+Video = Annotated[UploadFile, File(description="Video file (mp4, mov, webm, ...)")]
+
+
+@app.get("/api/presets")
+def list_presets() -> dict[str, GifSettings]:
+    """Settings behind each compression preset."""
+    return {preset.value: GifSettings.of(options) for preset, options in PRESETS.items()}
+
+
+@app.post(
+    "/api/convert",
+    response_class=FileResponse,
+    responses={200: {"content": {"image/gif": {}}}},
+)
+def convert(file: Video, params: Params) -> FileResponse:
+    """Convert a video to GIF.
+
+    The settings actually used are returned in the ``X-Gif-*`` headers, which
+    matters in target size mode.
+    """
     workdir = Path(tempfile.mkdtemp(prefix="gif-"))
     cleanup = BackgroundTask(shutil.rmtree, workdir, ignore_errors=True)
+    dst = workdir / "output.gif"
     try:
         src = workdir / "input"
         _save_upload(file, src)
-        if not trim.is_full:
-            _check_trim_fits(src, trim)
-        dst = convert_to_gif(
-            src, workdir / "output.gif", GifOptions(fps=fps, width=width), trim, overlay
-        )
+        options = params.options
+        if params.target_bytes is not None:
+            clip = _clip(src, params)
+            options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
+        else:
+            if not params.trim.is_full:
+                _clip(src, params)
+            convert_to_gif(src, dst, options, params.trim, params.overlay)
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
+    except TargetUnreachableError as exc:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ConversionError as exc:
         shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(status_code=422, detail=f"Could not convert video: {exc}") from exc
 
     stem = Path(file.filename or "video").stem or "video"
-    return FileResponse(dst, media_type="image/gif", filename=f"{stem}.gif", background=cleanup)
+    return FileResponse(
+        dst,
+        media_type="image/gif",
+        filename=f"{stem}.gif",
+        headers=_settings_headers(options),
+        background=cleanup,
+    )
 
 
-def _check_trim_fits(src: Path, trim: TrimRange) -> None:
+@app.post("/api/estimate")
+def estimate(file: Video, params: Params) -> SizeEstimateResponse:
+    """Predict the GIF size for these settings without returning the GIF.
+
+    With ``target_size_kb``, returns the settings that would be chosen to fit it.
+    Long clips are sampled, so the size is approximate unless ``exact`` is true.
+    """
+    workdir = Path(tempfile.mkdtemp(prefix="gif-"))
+    try:
+        src = workdir / "input"
+        _save_upload(file, src)
+        clip = _clip(src, params)
+        if params.target_bytes is not None:
+            result = fit_to_target(clip, params.options, params.target_bytes, workdir)
+        else:
+            result = estimate_size(clip, params.options, workdir)
+    except TargetUnreachableError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ConversionError as exc:
+        raise HTTPException(status_code=422, detail=f"Could not convert video: {exc}") from exc
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    return SizeEstimateResponse(
+        estimated_bytes=result.bytes,
+        duration=round(result.duration, 3),
+        exact=result.exact,
+        settings=GifSettings.of(result.options),
+    )
+
+
+def _clip(src: Path, params: ConversionParams) -> Clip:
+    """Check the trim range against the video and describe the clip."""
     try:
         video_duration = probe_duration(src)
     except ProbeError as exc:
         raise HTTPException(status_code=422, detail=f"Could not read video: {exc}") from exc
     try:
-        trim.check_within(video_duration)
+        params.trim.check_within(video_duration)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Clip.from_trim(src, params.trim, video_duration, params.overlay)
+
+
+def _settings_headers(options: GifOptions) -> dict[str, str]:
+    return {
+        "X-Gif-Fps": str(options.fps),
+        "X-Gif-Width": str(options.width),
+        "X-Gif-Colors": str(options.colors),
+        "X-Gif-Lossy": str(options.lossy),
+    }
 
 
 def _save_upload(upload: UploadFile, dst: Path) -> None:

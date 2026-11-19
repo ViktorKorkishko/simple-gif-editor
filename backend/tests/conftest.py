@@ -44,6 +44,12 @@ def long_video(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return make_test_clip(tmp_path_factory.mktemp("fixtures") / "long.mp4", 4)
 
 
+@pytest.fixture(scope="session")
+def sampled_video(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """An 8-second clip, long enough for size estimates to use samples."""
+    return make_test_clip(tmp_path_factory.mktemp("fixtures") / "sampled.mp4", 8)
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)

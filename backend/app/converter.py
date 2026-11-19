@@ -3,6 +3,7 @@
 import math
 import subprocess
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from app.config import settings
@@ -10,6 +11,8 @@ from app.overlay import TextOverlay
 
 MIN_FPS, MAX_FPS = 1, 30
 MIN_WIDTH, MAX_WIDTH = 16, 1920
+MIN_COLORS, MAX_COLORS = 2, 256
+MIN_LOSSY, MAX_LOSSY = 0, 200
 # Container durations are often rounded, so allow asking for a hair past the end.
 DURATION_TOLERANCE_S = 0.05
 
@@ -18,16 +21,47 @@ class ConversionError(RuntimeError):
     """FFmpeg could not convert the input (bad file, unsupported codec, timeout)."""
 
 
+class Dither(StrEnum):
+    """paletteuse dithering modes.
+
+    Error diffusion (sierra2_4a) looks best but its noise compresses poorly;
+    ordered Bayer dithering gives smaller files at a small cost in quality.
+    """
+
+    NONE = "none"
+    BAYER = "bayer"
+    SIERRA = "sierra2_4a"
+
+    @property
+    def filter_value(self) -> str:
+        if self is Dither.BAYER:
+            return "bayer:bayer_scale=3"
+        return self.value
+
+
 @dataclass(frozen=True)
 class GifOptions:
+    """Encoding settings.
+
+    ``colors`` limits the palette size; ``lossy`` is gifsicle's ``--lossy``
+    level (0 turns lossy compression and the gifsicle pass off).
+    """
+
     fps: int = 10
     width: int = 480
+    colors: int = MAX_COLORS
+    lossy: int = 0
+    dither: Dither = Dither.SIERRA
 
     def __post_init__(self) -> None:
         if not MIN_FPS <= self.fps <= MAX_FPS:
             raise ValueError(f"fps must be between {MIN_FPS} and {MAX_FPS}")
         if not MIN_WIDTH <= self.width <= MAX_WIDTH:
             raise ValueError(f"width must be between {MIN_WIDTH} and {MAX_WIDTH}")
+        if not MIN_COLORS <= self.colors <= MAX_COLORS:
+            raise ValueError(f"colors must be between {MIN_COLORS} and {MAX_COLORS}")
+        if not MIN_LOSSY <= self.lossy <= MAX_LOSSY:
+            raise ValueError(f"lossy must be between {MIN_LOSSY} and {MAX_LOSSY}")
 
 
 @dataclass(frozen=True)
@@ -90,9 +124,9 @@ class TrimRange:
 def build_filtergraph(options: GifOptions, text_filter: str | None = None) -> str:
     """Single-pass palettegen/paletteuse graph.
 
-    The video is split in two: one branch builds an optimal 256-colour palette
-    for the whole clip, the other is mapped onto it. This gives far better
-    colours than FFmpeg's default GIF palette.
+    The video is split in two: one branch builds an optimal palette of up to
+    ``options.colors`` colours for the whole clip, the other is mapped onto it.
+    This gives far better colours than FFmpeg's default GIF palette.
 
     ``text_filter`` (a drawtext filter) runs after scaling, so font sizes and
     offsets are in output pixels, and before palettegen, so the palette has
@@ -104,8 +138,8 @@ def build_filtergraph(options: GifOptions, text_filter: str | None = None) -> st
         f"scale={options.width}:-1:flags=lanczos,"
         f"{text}"
         "split[a][b];"
-        "[a]palettegen=stats_mode=diff[p];"
-        "[b][p]paletteuse=dither=sierra2_4a"
+        f"[a]palettegen=max_colors={options.colors}:stats_mode=diff[p];"
+        f"[b][p]paletteuse=dither={options.dither.filter_value}"
     )
 
 
@@ -134,6 +168,18 @@ def build_command(
     ]
 
 
+def build_gifsicle_command(src: Path, dst: Path, lossy: int) -> list[str]:
+    return [
+        settings.gifsicle_bin,
+        "--no-warnings",
+        "-O3",
+        f"--lossy={lossy}",
+        "-o",
+        str(dst),
+        str(src),
+    ]
+
+
 def convert_to_gif(
     src: Path,
     dst: Path,
@@ -146,17 +192,30 @@ def convert_to_gif(
     if overlay is not None:
         text_file = overlay.write_text_file(dst.with_name(f"{dst.stem}-text.txt"))
         text_filter = overlay.to_filter(text_file, settings.font_file)
+    # With lossy compression, FFmpeg writes an intermediate GIF for gifsicle.
+    ffmpeg_dst = dst.with_name(f"{dst.stem}-ffmpeg.gif") if options.lossy else dst
+    _run(build_command(src, ffmpeg_dst, options, trim, text_filter), ffmpeg_dst, "ffmpeg")
+    if options.lossy:
+        try:
+            _run(build_gifsicle_command(ffmpeg_dst, dst, options.lossy), dst, "gifsicle")
+        finally:
+            ffmpeg_dst.unlink(missing_ok=True)
+    return dst
+
+
+def _run(command: list[str], dst: Path, tool: str) -> None:
     try:
         result = subprocess.run(
-            build_command(src, dst, options, trim, text_filter),
+            command,
             capture_output=True,
             text=True,
             timeout=settings.ffmpeg_timeout_s,
             check=False,
         )
+    except FileNotFoundError as exc:
+        raise ConversionError(f"{tool} is not installed") from exc
     except subprocess.TimeoutExpired as exc:
         raise ConversionError("conversion timed out") from exc
     if result.returncode != 0 or not dst.exists() or dst.stat().st_size == 0:
-        detail = result.stderr.strip().splitlines()[-1:] or ["unknown ffmpeg error"]
+        detail = result.stderr.strip().splitlines()[-1:] or [f"unknown {tool} error"]
         raise ConversionError(detail[0])
-    return dst

@@ -2,7 +2,7 @@
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -167,6 +167,20 @@ class TextOverlay:
             # The commas inside the expression would otherwise split the graph.
             options.append(f"enable='{enable}'")
         return "drawtext=" + ":".join(options)
+
+    def shifted(self, offset: float, length: float) -> "TextOverlay | None":
+        """The overlay for a piece of the GIF that starts ``offset`` seconds in.
+
+        Used to render short samples of a longer GIF. Returns ``None`` when the
+        text is not visible during the ``length`` seconds of that piece.
+        """
+        if self.start is None and self.end is None:
+            return self
+        start = (self.start or 0.0) - offset
+        end = None if self.end is None else self.end - offset
+        if start >= length or (end is not None and end <= 0):
+            return None
+        return replace(self, start=start if start > 0 else None, end=end)
 
     def write_text_file(self, path: Path) -> Path:
         """Save the text for drawtext's ``textfile`` option (UTF-8, LF newlines)."""
