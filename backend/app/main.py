@@ -8,9 +8,10 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from app.compression import CompressionPreset, resolve_options
+from app.compression import PRESETS, CompressionPreset, resolve_options
 from app.config import settings
 from app.converter import (
     MAX_COLORS,
@@ -30,6 +31,8 @@ from app.estimate import (
     Clip,
     TargetUnreachableError,
     convert_to_target,
+    estimate_size,
+    fit_to_target,
 )
 from app.overlay import (
     MAX_FONT_SIZE,
@@ -46,6 +49,31 @@ app = FastAPI(title="Simple GIF Editor", version="0.1.0")
 
 CHUNK = 1024 * 1024
 MIN_TARGET_KB = 10
+
+
+class GifSettings(BaseModel):
+    fps: int
+    width: int
+    colors: int
+    lossy: int
+    dither: str
+
+    @classmethod
+    def of(cls, options: GifOptions) -> "GifSettings":
+        return cls(
+            fps=options.fps,
+            width=options.width,
+            colors=options.colors,
+            lossy=options.lossy,
+            dither=options.dither.value,
+        )
+
+
+class SizeEstimateResponse(BaseModel):
+    estimated_bytes: int
+    duration: float
+    exact: bool
+    settings: GifSettings
 
 
 @app.get("/health")
@@ -181,6 +209,12 @@ Params = Annotated[ConversionParams, Depends(conversion_params)]
 Video = Annotated[UploadFile, File(description="Video file (mp4, mov, webm, ...)")]
 
 
+@app.get("/api/presets")
+def list_presets() -> dict[str, GifSettings]:
+    """Settings behind each compression preset."""
+    return {preset.value: GifSettings.of(options) for preset, options in PRESETS.items()}
+
+
 @app.post(
     "/api/convert",
     response_class=FileResponse,
@@ -223,6 +257,36 @@ def convert(file: Video, params: Params) -> FileResponse:
         filename=f"{stem}.gif",
         headers=_settings_headers(options),
         background=cleanup,
+    )
+
+
+@app.post("/api/estimate")
+def estimate(file: Video, params: Params) -> SizeEstimateResponse:
+    """Predict the GIF size for these settings without returning the GIF.
+
+    With ``target_size_kb``, returns the settings that would be chosen to fit it.
+    Long clips are sampled, so the size is approximate unless ``exact`` is true.
+    """
+    workdir = Path(tempfile.mkdtemp(prefix="gif-"))
+    try:
+        src = workdir / "input"
+        _save_upload(file, src)
+        clip = _clip(src, params)
+        if params.target_bytes is not None:
+            result = fit_to_target(clip, params.options, params.target_bytes, workdir)
+        else:
+            result = estimate_size(clip, params.options, workdir)
+    except TargetUnreachableError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ConversionError as exc:
+        raise HTTPException(status_code=422, detail=f"Could not convert video: {exc}") from exc
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    return SizeEstimateResponse(
+        estimated_bytes=result.bytes,
+        duration=round(result.duration, 3),
+        exact=result.exact,
+        settings=GifSettings.of(result.options),
     )
 
 
