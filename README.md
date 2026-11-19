@@ -7,16 +7,16 @@
 ## Стек
 
 - **Бекенд:** Python 3.12, FastAPI, FFmpeg (`palettegen` / `paletteuse`), gifsicle
-- **Фронтенд:** React + Vite + TypeScript (з'явиться на етапі 5)
+- **Фронтенд:** React + Vite + TypeScript
 - **Інфраструктура:** Docker, docker-compose, GitHub Actions
 
 ## Структура
 
 ```
 backend/             FastAPI-застосунок і тести (pytest)
-frontend/            веб-інтерфейс (поки порожньо)
+frontend/            веб-інтерфейс (React + Vite)
 docker/              Dockerfile-и та docker-compose
-.github/workflows/   CI: лінт і тести
+.github/workflows/   CI: лінт, тести, збірка
 ```
 
 ## Запуск
@@ -27,12 +27,13 @@ docker/              Dockerfile-и та docker-compose
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-Сервіс буде доступний на <http://localhost:8000>, інтерактивна документація
-API на <http://localhost:8000/docs>.
+Веб-інтерфейс буде доступний на <http://localhost:8000>, інтерактивна
+документація API на <http://localhost:8000/docs>. Образ збирає фронтенд і
+віддає його тим самим сервером, що й API.
 
 ### Локально
 
-Потрібні Python 3.12+, FFmpeg і gifsicle у `PATH`.
+Потрібні Python 3.12+, FFmpeg і gifsicle у `PATH`, для інтерфейсу ще Node.js 22.
 
 ```bash
 cd backend
@@ -40,6 +41,36 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
+
+В іншому терміналі:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Інтерфейс відкриється на <http://localhost:5173> і проксуватиме `/api` на
+бекенд за адресою `http://localhost:8000` (інша адреса задається змінною
+`API_URL`).
+
+## Веб-інтерфейс
+
+- завантаження відео перетягуванням або через вибір файла, прев'ю в браузері;
+- обрізання повзунком, полями або кнопкою «поточний кадр», прев'ю зациклюється
+  на вибраному фрагменті;
+- підпис з розміром, кольором, обведенням, підкладкою, позицією та часом
+  появи, з наближеним прев'ю поверх відео;
+- пресет стиснення з можливістю підправити `fps`, ширину, палітру й `lossy`,
+  або цільовий розмір файла;
+- прогноз розміру, що оновлюється після кожної зміни налаштувань;
+- конвертація з прогресом завантаження, прев'ю готового GIF і кнопка
+  завантаження;
+- зрозумілі повідомлення про помилки, зокрема коли цільовий розмір
+  недосяжний.
+
+Якщо браузер не вміє відтворити формат відео, прев'ю немає, але фрагмент
+можна задати вручну й усе одно конвертувати.
 
 ## API
 
@@ -175,6 +206,7 @@ curl -F "file=@video.mp4" -F "text=Привіт!" -F "text_size=40" \
 | `FFPROBE_BIN`      | `ffprobe`        | шлях до ffprobe                    |
 | `GIFSICLE_BIN`     | `gifsicle`       | шлях до gifsicle                   |
 | `FONT_FILE`        | вбудований DejaVu Sans Bold | шрифт для тексту (`.ttf` / `.otf`) |
+| `FRONTEND_DIR`     | немає            | тека зі зібраним фронтендом, яку сервер віддає на `/` |
 
 ## Розробка
 
@@ -182,6 +214,10 @@ curl -F "file=@video.mp4" -F "text=Привіт!" -F "text_size=40" \
 cd backend
 ruff check . && ruff format --check .
 pytest
+
+cd frontend
+npm run typecheck
+npm test
 ```
 
 `main` захищена, кожен етап робиться в окремій гілці через pull request.
@@ -192,5 +228,5 @@ pytest
 - [x] 2. Обрізання за часом
 - [x] 3. Накладання тексту (шрифт, розмір, позиція, колір)
 - [x] 4. Пресети стиснення та прогноз розміру
-- [ ] 5. Веб-інтерфейс
+- [x] 5. Веб-інтерфейс
 - [ ] 6. Підготовка до хостингу: ліміти, очищення файлів, черга

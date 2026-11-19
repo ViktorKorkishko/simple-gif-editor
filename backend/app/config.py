@@ -15,6 +15,9 @@ class Settings:
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "100"))
     ffmpeg_timeout_s: int = int(os.getenv("FFMPEG_TIMEOUT_S", "120"))
     font_file: Path = Path(os.getenv("FONT_FILE", str(DEFAULT_FONT)))
+    frontend_dir: Path | None = (
+        Path(os.environ["FRONTEND_DIR"]) if os.getenv("FRONTEND_DIR") else None
+    )
 
     @property
     def max_upload_bytes(self) -> int:

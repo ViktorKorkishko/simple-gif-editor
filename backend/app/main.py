@@ -8,6 +8,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
@@ -325,3 +326,15 @@ def _save_upload(upload: UploadFile, dst: Path) -> None:
             out.write(chunk)
     if written == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+
+def mount_frontend(target: FastAPI, directory: Path | None) -> None:
+    """Serve the built web UI from ``directory`` at ``/``, after the API routes."""
+    if directory is None:
+        return
+    if not directory.is_dir():
+        raise RuntimeError(f"FRONTEND_DIR {directory} is not a directory")
+    target.mount("/", StaticFiles(directory=directory, html=True), name="frontend")
+
+
+mount_frontend(app, settings.frontend_dir)
