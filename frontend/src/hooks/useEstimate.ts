@@ -5,7 +5,7 @@ export type EstimateState =
   | { status: "idle" }
   | { status: "loading"; previous: SizeEstimate | null }
   | { status: "done"; estimate: SizeEstimate }
-  | { status: "error"; message: string };
+  | { status: "error"; error: unknown };
 
 const DEBOUNCE_MS = 800;
 
@@ -44,10 +44,7 @@ export function useEstimate(
         .then((estimate) => setState({ status: "done", estimate }))
         .catch((error: unknown) => {
           if (isAbort(error)) return;
-          setState({
-            status: "error",
-            message: error instanceof Error ? error.message : String(error),
-          });
+          setState({ status: "error", error });
         });
     }, DEBOUNCE_MS);
     return () => {

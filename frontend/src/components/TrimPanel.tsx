@@ -1,4 +1,5 @@
 import { NumberField } from "./NumberField";
+import { useI18n } from "../i18n/I18nProvider";
 import { formatTime, roundTime } from "../lib/format";
 import { clipLength, type EditorSettings } from "../lib/settings";
 
@@ -14,6 +15,7 @@ interface Props {
 const STEP = 0.1;
 
 export function TrimPanel({ settings, duration, onChange, onSeek, currentTime }: Props) {
+  const { t } = useI18n();
   const end = settings.end ?? duration;
   const length = clipLength(settings, duration);
 
@@ -36,8 +38,8 @@ export function TrimPanel({ settings, duration, onChange, onSeek, currentTime }:
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2>Trim</h2>
-        {length !== null && <span className="badge">GIF length {formatTime(length)}</span>}
+        <h2>{t.trim.title}</h2>
+        {length !== null && <span className="badge">{t.trim.gifLength(formatTime(length))}</span>}
       </div>
 
       {duration !== null && end !== null && (
@@ -51,7 +53,7 @@ export function TrimPanel({ settings, duration, onChange, onSeek, currentTime }:
           />
           <input
             type="range"
-            aria-label="Start"
+            aria-label={t.trim.start}
             min={0}
             max={duration}
             step={STEP}
@@ -60,7 +62,7 @@ export function TrimPanel({ settings, duration, onChange, onSeek, currentTime }:
           />
           <input
             type="range"
-            aria-label="End"
+            aria-label={t.trim.end}
             min={0}
             max={duration}
             step={STEP}
@@ -73,8 +75,8 @@ export function TrimPanel({ settings, duration, onChange, onSeek, currentTime }:
       <div className="row">
         <div className="trim-field">
           <NumberField
-            label="Start"
-            suffix="s"
+            label={t.trim.start}
+            suffix={t.units.seconds}
             min={0}
             max={duration ?? undefined}
             step={STEP}
@@ -82,29 +84,27 @@ export function TrimPanel({ settings, duration, onChange, onSeek, currentTime }:
             onChange={(value) => setStart(value ?? 0)}
           />
           <button type="button" className="link" onClick={() => setStart(currentTime())}>
-            Use current frame
+            {t.trim.useCurrentFrame}
           </button>
         </div>
         <div className="trim-field">
           <NumberField
-            label="End"
-            suffix="s"
+            label={t.trim.end}
+            suffix={t.units.seconds}
             min={0}
             max={duration ?? undefined}
             step={STEP}
             value={settings.end}
-            placeholder={duration === null ? "end of video" : String(roundTime(duration))}
+            placeholder={duration === null ? t.trim.endOfVideo : String(roundTime(duration))}
             onChange={setEnd}
           />
           <button type="button" className="link" onClick={() => setEnd(currentTime())}>
-            Use current frame
+            {t.trim.useCurrentFrame}
           </button>
         </div>
       </div>
       {duration !== null && (
-        <p className="muted small">
-          Video length {formatTime(duration)}. Playback loops over the selected range.
-        </p>
+        <p className="muted small">{t.trim.videoLength(formatTime(duration))}</p>
       )}
     </section>
   );

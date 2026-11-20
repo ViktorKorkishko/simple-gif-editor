@@ -1,6 +1,8 @@
 import { NumberField } from "./NumberField";
+import { SettingsSummary } from "./SettingsSummary";
+import { useI18n } from "../i18n/I18nProvider";
 import type { PresetTable } from "../lib/api";
-import { LIMITS, PRESETS, type EditorSettings, type Overrides, type Preset } from "../lib/settings";
+import { LIMITS, PRESETS, type EditorSettings, type Overrides } from "../lib/settings";
 
 interface Props {
   settings: EditorSettings;
@@ -8,13 +10,8 @@ interface Props {
   onChange: (patch: Partial<EditorSettings>) => void;
 }
 
-const PRESET_LABELS: Record<Preset, { title: string; note: string }> = {
-  high: { title: "High", note: "Best quality, biggest file" },
-  medium: { title: "Medium", note: "Balanced" },
-  low: { title: "Low", note: "Smallest file" },
-};
-
 export function CompressionPanel({ settings, presets, onChange }: Props) {
+  const { t } = useI18n();
   const setOverride = (key: keyof Overrides, value: number | null) =>
     onChange({ overrides: { ...settings.overrides, [key]: value } });
   const base = presets?.[settings.preset];
@@ -23,7 +20,7 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2>Quality and size</h2>
+        <h2>{t.compression.title}</h2>
       </div>
 
       <div className="segmented" role="tablist">
@@ -34,7 +31,7 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
           className={settings.mode === "preset" ? "selected" : ""}
           onClick={() => onChange({ mode: "preset" })}
         >
-          Preset
+          {t.compression.modePreset}
         </button>
         <button
           type="button"
@@ -43,22 +40,22 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
           className={settings.mode === "target" ? "selected" : ""}
           onClick={() => onChange({ mode: "target" })}
         >
-          Target size
+          {t.compression.modeTarget}
         </button>
       </div>
 
       {settings.mode === "target" && (
         <div className="target">
           <NumberField
-            label="Maximum GIF size"
-            suffix="KB"
+            label={t.compression.maxSize}
+            suffix={t.units.kb}
             min={LIMITS.minTargetKb}
             step={1}
             value={settings.targetSizeKb}
             onChange={(value) => onChange({ targetSizeKb: value })}
             hint={
               settings.targetSizeKb && settings.targetSizeKb >= 1024
-                ? `≈ ${(settings.targetSizeKb / 1024).toFixed(2)} MB`
+                ? `≈ ${(settings.targetSizeKb / 1024).toFixed(2)} ${t.units.mb}`
                 : undefined
             }
           />
@@ -70,18 +67,15 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
                 className={`chip${settings.targetSizeKb === kb ? " selected" : ""}`}
                 onClick={() => onChange({ targetSizeKb: kb })}
               >
-                {kb < 1024 ? `${kb} KB` : `${kb / 1024} MB`}
+                {kb < 1024 ? `${kb} ${t.units.kb}` : `${kb / 1024} ${t.units.mb}`}
               </button>
             ))}
           </div>
-          <p className="muted small">
-            The preset below is the starting point. Colors, frame rate and then width are lowered
-            until the GIF fits.
-          </p>
+          <p className="muted small">{t.compression.targetNote}</p>
         </div>
       )}
 
-      <div className="preset-list" role="radiogroup" aria-label="Compression preset">
+      <div className="preset-list" role="radiogroup" aria-label={t.compression.presetGroup}>
         {PRESETS.map((preset) => {
           const values = presets?.[preset];
           return (
@@ -93,12 +87,11 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
               className={`preset${settings.preset === preset ? " selected" : ""}`}
               onClick={() => onChange({ preset })}
             >
-              <span className="preset-title">{PRESET_LABELS[preset].title}</span>
-              <span className="muted small">{PRESET_LABELS[preset].note}</span>
+              <span className="preset-title">{t.compression.presets[preset].title}</span>
+              <span className="muted small">{t.compression.presets[preset].note}</span>
               {values && (
                 <span className="preset-values small">
-                  {values.fps} fps · {values.width}px · {values.colors} colors
-                  {values.lossy ? ` · lossy ${values.lossy}` : ""}
+                  <SettingsSummary settings={values} />
                 </span>
               )}
             </button>
@@ -107,11 +100,14 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
       </div>
 
       <details className="advanced" open={overridden || undefined}>
-        <summary>Fine-tune{overridden ? " (custom)" : ""}</summary>
-        <p className="muted small">Leave a field empty to use the preset's value.</p>
+        <summary>
+          {t.compression.fineTune}
+          {overridden ? ` (${t.compression.custom})` : ""}
+        </summary>
+        <p className="muted small">{t.compression.leaveEmpty}</p>
         <div className="grid-4">
           <NumberField
-            label="FPS"
+            label={t.compression.fps}
             min={LIMITS.fps[0]}
             max={LIMITS.fps[1]}
             step={1}
@@ -120,8 +116,8 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
             onChange={(value) => setOverride("fps", value)}
           />
           <NumberField
-            label="Width"
-            suffix="px"
+            label={t.compression.width}
+            suffix={t.units.px}
             min={LIMITS.width[0]}
             max={LIMITS.width[1]}
             step={1}
@@ -130,7 +126,7 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
             onChange={(value) => setOverride("width", value)}
           />
           <NumberField
-            label="Colors"
+            label={t.compression.colors}
             min={LIMITS.colors[0]}
             max={LIMITS.colors[1]}
             step={1}
@@ -139,7 +135,7 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
             onChange={(value) => setOverride("colors", value)}
           />
           <NumberField
-            label="Lossy"
+            label={t.compression.lossy}
             min={LIMITS.lossy[0]}
             max={LIMITS.lossy[1]}
             step={1}
@@ -154,7 +150,7 @@ export function CompressionPanel({ settings, presets, onChange }: Props) {
             className="link"
             onClick={() => onChange({ overrides: { fps: null, width: null, colors: null, lossy: null } })}
           >
-            Reset to preset
+            {t.compression.reset}
           </button>
         )}
       </details>

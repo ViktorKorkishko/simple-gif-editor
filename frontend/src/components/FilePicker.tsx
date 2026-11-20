@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface Props {
   onFile: (file: File) => void;
@@ -6,6 +7,7 @@ interface Props {
 }
 
 export function FilePicker({ onFile, compact }: Props) {
+  const { t } = useI18n();
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -18,7 +20,7 @@ export function FilePicker({ onFile, compact }: Props) {
     return (
       <>
         <button type="button" className="button secondary" onClick={() => input.current?.click()}>
-          Choose another video
+          {t.filePicker.chooseAnother}
         </button>
         <input
           ref={input}
@@ -60,8 +62,8 @@ export function FilePicker({ onFile, compact }: Props) {
       <div className="dropzone-icon" aria-hidden>
         🎬
       </div>
-      <p className="dropzone-title">Drop a video here or click to choose one</p>
-      <p className="muted">MP4, MOV, WebM and other formats FFmpeg can read</p>
+      <p className="dropzone-title">{t.filePicker.dropTitle}</p>
+      <p className="muted">{t.filePicker.formats}</p>
       <input
         ref={input}
         type="file"
