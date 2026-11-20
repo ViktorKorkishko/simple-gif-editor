@@ -7,6 +7,7 @@ describe("formatBytes", () => {
     expect(formatBytes(1536)).toBe("1.5 KB");
     expect(formatBytes(200 * 1024)).toBe("200 KB");
     expect(formatBytes(1105437)).toBe("1.05 MB");
+    expect(formatBytes(1536, { b: "Б", kb: "КБ", mb: "МБ" })).toBe("1.5 КБ");
   });
 });
 

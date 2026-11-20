@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { uk } from "../i18n/uk";
 import { DEFAULT_SETTINGS, clipLength, toFormFields, validate, type EditorSettings } from "./settings";
 
 const make = (patch: Partial<EditorSettings> = {}): EditorSettings => ({
@@ -80,6 +81,13 @@ describe("validate", () => {
       "Target size must be at least 10 KB.",
     );
     expect(validate(make({ mode: "target", targetSizeKb: null }), 10)).toHaveLength(1);
+  });
+
+  it("reports problems in the given language", () => {
+    const overrides = { fps: 60, width: null, colors: null, lossy: null };
+    expect(validate(make({ overrides }), 10, uk.validation)).toEqual([
+      "Кадр/с: значення має бути від 1 до 30.",
+    ]);
   });
 });
 
