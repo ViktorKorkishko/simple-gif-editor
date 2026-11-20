@@ -78,7 +78,37 @@ h2 {
 }
 
 .app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 20px;
+}
+
+.language-switcher {
+  display: flex;
+  flex-shrink: 0;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.language-switcher button {
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.language-switcher button.selected {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 15%);
 }
 
 .app-header p {

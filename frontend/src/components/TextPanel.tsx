@@ -1,4 +1,5 @@
 import { NumberField } from "./NumberField";
+import { useI18n } from "../i18n/I18nProvider";
 import { LIMITS, hasText, type EditorSettings, type TextPosition } from "../lib/settings";
 
 interface Props {
@@ -30,25 +31,26 @@ const GRID: (TextPosition | null)[] = [
 ];
 
 export function TextPanel({ settings, onChange }: Props) {
+  const { t } = useI18n();
   const enabled = hasText(settings);
 
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2>Text</h2>
+        <h2>{t.text.title}</h2>
         {enabled && (
           <button type="button" className="link" onClick={() => onChange({ text: "" })}>
-            Remove
+            {t.text.remove}
           </button>
         )}
       </div>
 
       <label className="field">
-        <span className="field-label">Caption</span>
+        <span className="field-label">{t.text.caption}</span>
         <textarea
           rows={2}
           maxLength={LIMITS.textLength}
-          placeholder="Optional. Line breaks are kept."
+          placeholder={t.text.captionPlaceholder}
           value={settings.text}
           onChange={(event) => onChange({ text: event.target.value })}
         />
@@ -57,8 +59,8 @@ export function TextPanel({ settings, onChange }: Props) {
       <fieldset className="text-options" disabled={!enabled}>
         <div className="row">
           <div className="field">
-            <span className="field-label">Position</span>
-            <div className="position-grid" role="radiogroup" aria-label="Text position">
+            <span className="field-label">{t.text.position}</span>
+            <div className="position-grid" role="radiogroup" aria-label={t.text.positionGroup}>
               {GRID.map((position, index) =>
                 position ? (
                   <button
@@ -66,8 +68,8 @@ export function TextPanel({ settings, onChange }: Props) {
                     type="button"
                     role="radio"
                     aria-checked={settings.textPosition === position}
-                    aria-label={position}
-                    title={position}
+                    aria-label={t.text.positions[position]}
+                    title={t.text.positions[position]}
                     className={settings.textPosition === position ? "selected" : ""}
                     onClick={() => onChange({ textPosition: position })}
                   >
@@ -81,8 +83,8 @@ export function TextPanel({ settings, onChange }: Props) {
           </div>
           <div className="stack">
             <NumberField
-              label="Font size"
-              suffix="px"
+              label={t.text.fontSize}
+              suffix={t.units.px}
               min={LIMITS.textSize[0]}
               max={LIMITS.textSize[1]}
               step={1}
@@ -90,7 +92,7 @@ export function TextPanel({ settings, onChange }: Props) {
               onChange={(value) => onChange({ textSize: value ?? 32 })}
             />
             <label className="field">
-              <span className="field-label">Color</span>
+              <span className="field-label">{t.text.color}</span>
               <input
                 type="color"
                 value={settings.textColor}
@@ -102,8 +104,8 @@ export function TextPanel({ settings, onChange }: Props) {
 
         <div className="row">
           <NumberField
-            label="Outline"
-            suffix="px"
+            label={t.text.outline}
+            suffix={t.units.px}
             min={LIMITS.textOutline[0]}
             max={LIMITS.textOutline[1]}
             step={1}
@@ -111,7 +113,7 @@ export function TextPanel({ settings, onChange }: Props) {
             onChange={(value) => onChange({ textOutline: value ?? 0 })}
           />
           <label className="field">
-            <span className="field-label">Outline color</span>
+            <span className="field-label">{t.text.outlineColor}</span>
             <input
               type="color"
               value={settings.textOutlineColor}
@@ -128,12 +130,12 @@ export function TextPanel({ settings, onChange }: Props) {
               checked={settings.textBox}
               onChange={(event) => onChange({ textBox: event.target.checked })}
             />
-            Background box
+            {t.text.backgroundBox}
           </label>
           {settings.textBox && (
             <>
               <label className="field">
-                <span className="field-label">Box color</span>
+                <span className="field-label">{t.text.boxColor}</span>
                 <input
                   type="color"
                   value={settings.textBoxColor}
@@ -141,7 +143,9 @@ export function TextPanel({ settings, onChange }: Props) {
                 />
               </label>
               <label className="field">
-                <span className="field-label">Opacity {Math.round(settings.textBoxOpacity * 100)}%</span>
+                <span className="field-label">
+                  {t.text.opacity(Math.round(settings.textBoxOpacity * 100))}
+                </span>
                 <input
                   type="range"
                   min={0}
@@ -157,27 +161,25 @@ export function TextPanel({ settings, onChange }: Props) {
 
         <div className="row">
           <NumberField
-            label="Show from"
-            suffix="s"
+            label={t.text.showFrom}
+            suffix={t.units.seconds}
             min={0}
             step={0.1}
-            placeholder="start"
+            placeholder={t.text.startPlaceholder}
             value={settings.textStart}
             onChange={(value) => onChange({ textStart: value })}
           />
           <NumberField
-            label="Hide at"
-            suffix="s"
+            label={t.text.hideAt}
+            suffix={t.units.seconds}
             min={0}
             step={0.1}
-            placeholder="end"
+            placeholder={t.text.endPlaceholder}
             value={settings.textEnd}
             onChange={(value) => onChange({ textEnd: value })}
           />
         </div>
-        <p className="muted small">
-          Times count from the start of the GIF. Sizes are in GIF pixels. The preview is approximate.
-        </p>
+        <p className="muted small">{t.text.note}</p>
       </fieldset>
     </section>
   );

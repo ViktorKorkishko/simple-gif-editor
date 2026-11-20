@@ -1,5 +1,6 @@
 /** Thin client for the backend API. */
 
+import { en, type Messages } from "../i18n/en";
 import type { Preset } from "./settings";
 
 export interface GifSettings {
@@ -27,10 +28,11 @@ export type PresetTable = Record<Preset, GifSettings>;
 
 export class ApiError extends Error {
   constructor(
-    message: string,
     readonly status: number,
+    /** The server's own explanation, if it sent one. */
+    readonly detail: string | null,
   ) {
-    super(message);
+    super(detail ?? fallbackMessage(status));
     this.name = "ApiError";
   }
 }
@@ -40,8 +42,8 @@ interface ValidationIssue {
   msg?: string;
 }
 
-/** Turn a FastAPI error body into one readable sentence. */
-export function errorMessage(status: number, body: unknown): string {
+/** Turn a FastAPI error body into one readable sentence, or null if it has none. */
+export function serverDetail(body: unknown): string | null {
   const detail = (body as { detail?: unknown } | null)?.detail;
   if (typeof detail === "string" && detail) return detail;
   if (Array.isArray(detail) && detail.length > 0) {
@@ -52,9 +54,20 @@ export function errorMessage(status: number, body: unknown): string {
       })
       .join("; ");
   }
-  if (status === 413) return "The video is too large for the server.";
-  if (status === 0) return "Could not reach the server. Is the backend running?";
-  return `The server responded with an error (HTTP ${status}).`;
+  return null;
+}
+
+/** What to tell the user when the server gave no explanation. */
+export function fallbackMessage(status: number, messages: Messages["errors"] = en.errors): string {
+  if (status === 413) return messages.tooLarge;
+  if (status === 0) return messages.unreachable;
+  return messages.http(status);
+}
+
+/** A failed request as one sentence in the UI language; server details are shown as sent. */
+export function describeError(error: unknown, messages: Messages["errors"] = en.errors): string {
+  if (error instanceof ApiError) return error.detail ?? fallbackMessage(error.status, messages);
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function buildForm(file: File, fields: Record<string, string>): FormData {
@@ -136,9 +149,9 @@ function postForm(
           body = null;
         }
       }
-      reject(new ApiError(errorMessage(xhr.status, body), xhr.status));
+      reject(new ApiError(xhr.status, serverDetail(body)));
     };
-    xhr.onerror = () => reject(new ApiError(errorMessage(0, null), 0));
+    xhr.onerror = () => reject(new ApiError(0, null));
     xhr.onabort = () => reject(new DOMException("Aborted", "AbortError"));
     signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(form);
@@ -170,7 +183,7 @@ export async function convertVideo(
 
 export async function fetchPresets(signal?: AbortSignal): Promise<PresetTable> {
   const response = await fetch("/api/presets", { signal });
-  if (!response.ok) throw new ApiError(errorMessage(response.status, null), response.status);
+  if (!response.ok) throw new ApiError(response.status, null);
   return (await response.json()) as PresetTable;
 }
 

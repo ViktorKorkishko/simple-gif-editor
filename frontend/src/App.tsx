@@ -2,13 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CompressionPanel } from "./components/CompressionPanel";
 import { EstimatePanel } from "./components/EstimatePanel";
 import { FilePicker } from "./components/FilePicker";
+import { LanguageSwitcher } from "./components/LanguageSwitcher";
 import { ResultPanel } from "./components/ResultPanel";
 import { TextPanel } from "./components/TextPanel";
 import { TrimPanel } from "./components/TrimPanel";
 import { VideoPreview, type VideoPreviewHandle } from "./components/VideoPreview";
 import { useEstimate } from "./hooks/useEstimate";
 import { useObjectUrl } from "./hooks/useObjectUrl";
-import { convertVideo, fetchPresets, isAbort, type ConvertResult, type PresetTable } from "./lib/api";
+import { useI18n } from "./i18n/I18nProvider";
+import {
+  convertVideo,
+  describeError,
+  fetchPresets,
+  isAbort,
+  type ConvertResult,
+  type PresetTable,
+} from "./lib/api";
 import { formatBytes } from "./lib/format";
 import {
   DEFAULT_SETTINGS,
@@ -22,9 +31,10 @@ type ConvertState =
   | { status: "idle" }
   | { status: "uploading"; progress: number }
   | { status: "converting" }
-  | { status: "error"; message: string };
+  | { status: "error"; error: unknown };
 
 export default function App() {
+  const { t } = useI18n();
   const [file, setFile] = useState<File | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [unplayable, setUnplayable] = useState(false);
@@ -59,7 +69,10 @@ export default function App() {
     setSettings((current) => ({ ...current, start: 0, end: null, textStart: null, textEnd: null }));
   };
 
-  const errors = useMemo(() => validate(settings, duration), [settings, duration]);
+  const errors = useMemo(
+    () => validate(settings, duration, t.validation),
+    [settings, duration, t],
+  );
   const fields = useMemo(() => toFormFields(settings, duration), [settings, duration]);
   // Wait for the video's duration so the trim range is checked before uploading.
   const ready = file !== null && (duration !== null || unplayable);
@@ -91,10 +104,7 @@ export default function App() {
         setConvertState({ status: "idle" });
         return;
       }
-      setConvertState({
-        status: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
+      setConvertState({ status: "error", error });
     } finally {
       if (conversion.current === controller) conversion.current = null;
     }
@@ -103,8 +113,11 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Simple GIF Editor</h1>
-        <p className="muted">Turn a video clip into a GIF: trim it, add a caption, pick the size.</p>
+        <div>
+          <h1>{t.app.title}</h1>
+          <p className="muted">{t.app.tagline}</p>
+        </div>
+        <LanguageSwitcher />
       </header>
 
       {!file || !videoUrl ? (
@@ -119,13 +132,10 @@ export default function App() {
                 <h2 className="filename" title={file.name}>
                   {file.name}
                 </h2>
-                <span className="badge">{formatBytes(file.size)}</span>
+                <span className="badge">{formatBytes(file.size, t.units)}</span>
               </div>
               {unplayable ? (
-                <div className="notice">
-                  Your browser can't play this format, so there is no preview. You can still set
-                  the trim range by hand and convert it.
-                </div>
+                <div className="notice">{t.app.unplayable}</div>
               ) : (
                 <VideoPreview
                   ref={preview}
@@ -162,8 +172,8 @@ export default function App() {
               )}
               {convertState.status === "error" && (
                 <div className="estimate error" role="alert">
-                  <strong>Conversion failed</strong>
-                  <span>{convertState.message}</span>
+                  <strong>{t.app.conversionFailed}</strong>
+                  <span>{describeError(convertState.error, t.errors)}</span>
                 </div>
               )}
               {busy ? (
@@ -180,15 +190,15 @@ export default function App() {
                   </div>
                   <span className="small">
                     {convertState.status === "uploading"
-                      ? `Uploading ${Math.round(convertState.progress * 100)}%`
-                      : "Converting…"}
+                      ? t.app.uploading(Math.round(convertState.progress * 100))
+                      : t.app.converting}
                   </span>
                   <button
                     type="button"
                     className="button secondary"
                     onClick={() => conversion.current?.abort()}
                   >
-                    Cancel
+                    {t.app.cancel}
                   </button>
                 </div>
               ) : (
@@ -198,7 +208,7 @@ export default function App() {
                   disabled={!ready || errors.length > 0}
                   onClick={convert}
                 >
-                  Convert to GIF
+                  {t.app.convert}
                 </button>
               )}
             </section>

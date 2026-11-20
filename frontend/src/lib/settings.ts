@@ -1,5 +1,7 @@
 /** Editor state and its translation into the API's form fields. */
 
+import { en, type Messages } from "../i18n/en";
+
 export const PRESETS = ["high", "medium", "low"] as const;
 export type Preset = (typeof PRESETS)[number];
 
@@ -101,50 +103,47 @@ function inRange(value: number, [min, max]: readonly [number, number]): boolean 
 }
 
 /** Problems that would make the backend reject the request, in plain words. */
-export function validate(settings: EditorSettings, duration: number | null): string[] {
+export function validate(
+  settings: EditorSettings,
+  duration: number | null,
+  messages: Messages["validation"] = en.validation,
+): string[] {
   const errors: string[] = [];
   const { start, end } = settings;
 
-  if (!Number.isFinite(start) || start < 0) errors.push("Start must be 0 or later.");
-  if (duration !== null && start >= duration) errors.push("Start must be before the end of the video.");
+  if (!Number.isFinite(start) || start < 0) errors.push(messages.startNegative);
+  if (duration !== null && start >= duration) errors.push(messages.startAfterVideo);
   if (end !== null) {
-    if (!Number.isFinite(end) || end <= start) errors.push("End must be after the start.");
-    else if (duration !== null && end > duration + EPSILON)
-      errors.push("End is past the end of the video.");
+    if (!Number.isFinite(end) || end <= start) errors.push(messages.endBeforeStart);
+    else if (duration !== null && end > duration + EPSILON) errors.push(messages.endAfterVideo);
   }
 
   if (hasText(settings)) {
-    if (settings.text.length > LIMITS.textLength)
-      errors.push(`Text must be at most ${LIMITS.textLength} characters.`);
+    if (settings.text.length > LIMITS.textLength) errors.push(messages.textTooLong(LIMITS.textLength));
     if (!inRange(settings.textSize, LIMITS.textSize))
-      errors.push(`Font size must be between ${LIMITS.textSize[0]} and ${LIMITS.textSize[1]}.`);
+      errors.push(messages.fontSize(...LIMITS.textSize));
     if (!inRange(settings.textOutline, LIMITS.textOutline))
-      errors.push(`Outline must be between ${LIMITS.textOutline[0]} and ${LIMITS.textOutline[1]}.`);
+      errors.push(messages.outline(...LIMITS.textOutline));
     const { textStart, textEnd } = settings;
     const length = clipLength(settings, duration);
     if (textStart !== null && length !== null && textStart >= length)
-      errors.push("Text must appear before the GIF ends.");
+      errors.push(messages.textAfterGif);
     if (textStart !== null && textEnd !== null && textEnd <= textStart)
-      errors.push("Text must disappear after it appears.");
+      errors.push(messages.textHiddenBeforeShown);
   }
 
-  const overrideLimits: [keyof Overrides, string][] = [
-    ["fps", "FPS"],
-    ["width", "Width"],
-    ["colors", "Colors"],
-    ["lossy", "Lossy level"],
-  ];
-  for (const [key, label] of overrideLimits) {
+  const overrideKeys: (keyof Overrides)[] = ["fps", "width", "colors", "lossy"];
+  for (const key of overrideKeys) {
     const value = settings.overrides[key];
     const limits = LIMITS[key];
     if (value !== null && !inRange(value, limits))
-      errors.push(`${label} must be between ${limits[0]} and ${limits[1]}.`);
+      errors.push(messages.overrideRange(messages.overrideLabels[key], limits[0], limits[1]));
   }
 
   if (settings.mode === "target") {
     const target = settings.targetSizeKb;
     if (target === null || !Number.isFinite(target) || target < LIMITS.minTargetKb)
-      errors.push(`Target size must be at least ${LIMITS.minTargetKb} KB.`);
+      errors.push(messages.targetTooSmall(LIMITS.minTargetKb));
   }
 
   return errors;
