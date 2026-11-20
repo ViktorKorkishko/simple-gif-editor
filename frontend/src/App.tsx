@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CompressionPanel } from "./components/CompressionPanel";
 import { EstimatePanel } from "./components/EstimatePanel";
 import { FilePicker } from "./components/FilePicker";
+import { LanguageSwitcher } from "./components/LanguageSwitcher";
 import { ResultPanel } from "./components/ResultPanel";
 import { TextPanel } from "./components/TextPanel";
 import { TrimPanel } from "./components/TrimPanel";
@@ -112,8 +113,11 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>{t.app.title}</h1>
-        <p className="muted">{t.app.tagline}</p>
+        <div>
+          <h1>{t.app.title}</h1>
+          <p className="muted">{t.app.tagline}</p>
+        </div>
+        <LanguageSwitcher />
       </header>
 
       {!file || !videoUrl ? (
