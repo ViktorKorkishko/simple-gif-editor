@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.converter import GifOptions, TrimRange, build_command, convert_to_gif
+from app.converter import GifOptions, TrimRange, build_command, convert_video
 from app.probe import probe_duration
 
 
@@ -73,5 +73,5 @@ def test_command_without_trim(tmp_path: Path):
     ],
 )
 def test_convert_trims_clip(long_video: Path, tmp_path: Path, trim, expected):
-    out = convert_to_gif(long_video, tmp_path / "out.gif", GifOptions(fps=10, width=80), trim)
+    out = convert_video(long_video, tmp_path / "out.gif", GifOptions(fps=10, width=80), trim)
     assert probe_duration(out) == pytest.approx(expected, abs=0.15)

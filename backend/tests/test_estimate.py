@@ -3,11 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from app.converter import MIN_WIDTH, GifOptions, TrimRange, convert_to_gif
+from app.converter import MIN_WIDTH, GifOptions, OutputFormat, TrimRange, convert_video
 from app.estimate import (
     SAMPLE_COUNT,
     Clip,
     TargetUnreachableError,
+    container_overhead,
     convert_to_target,
     estimate_size,
     fit_to_target,
@@ -87,7 +88,7 @@ def test_overlay_shift(start, end, offset, expected):
 def test_short_clip_estimate_is_exact(long_video: Path, tmp_path: Path):
     options = GifOptions(width=80)
     result = estimate_size(Clip(long_video, 0, 4.0), options, tmp_path)
-    actual = convert_to_gif(long_video, tmp_path / "full.gif", options).stat().st_size
+    actual = convert_video(long_video, tmp_path / "full.gif", options).stat().st_size
     assert result.exact
     assert result.bytes == actual
     assert result.rendered is not None and result.rendered.exists()
@@ -96,7 +97,7 @@ def test_short_clip_estimate_is_exact(long_video: Path, tmp_path: Path):
 def test_sampled_estimate_is_close(sampled_video: Path, tmp_path: Path):
     options = GifOptions(width=120)
     result = estimate_size(Clip(sampled_video, 0, 8.0), options, tmp_path)
-    actual = convert_to_gif(sampled_video, tmp_path / "full.gif", options).stat().st_size
+    actual = convert_video(sampled_video, tmp_path / "full.gif", options).stat().st_size
     assert not result.exact
     assert result.bytes == pytest.approx(actual, rel=0.25)
     assert not list(tmp_path.glob("sample-*"))
@@ -158,5 +159,19 @@ def test_convert_to_target_reuses_exact_render(long_video: Path, tmp_path: Path)
 
 @needs_gifsicle
 def test_unreachable_target(sampled_video: Path, tmp_path: Path):
-    with pytest.raises(TargetUnreachableError, match="cannot fit the GIF into 1 KB"):
+    with pytest.raises(TargetUnreachableError, match="cannot fit the file into 1 KB"):
         fit_to_target(Clip(sampled_video, 0, 8.0), GifOptions(), 1024, tmp_path)
+
+
+def test_container_overhead_by_format():
+    assert container_overhead(GifOptions(colors=64)) == gif_overhead(64)
+    assert container_overhead(GifOptions(format=OutputFormat.WEBP)) < gif_overhead(256)
+    assert container_overhead(GifOptions(format=OutputFormat.MP4)) > 0
+
+
+def test_estimate_webp_samples(sampled_video: Path, tmp_path: Path):
+    clip = Clip(src=sampled_video, start=0.0, length=8.0)
+    estimate = estimate_size(clip, GifOptions(width=80, format=OutputFormat.WEBP), tmp_path)
+    assert estimate.exact is False
+    assert estimate.bytes > 0
+    assert not list(tmp_path.glob("sample-*"))

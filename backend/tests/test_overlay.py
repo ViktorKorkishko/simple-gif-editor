@@ -7,7 +7,7 @@ import pytest
 
 from app import converter
 from app.config import settings
-from app.converter import GifOptions, build_filtergraph, convert_to_gif
+from app.converter import GifOptions, build_filtergraph, convert_video
 from app.overlay import TextOverlay, TextPosition, escape_filter_value, is_valid_color
 
 FRAME_W, FRAME_H = 160, 120
@@ -170,7 +170,7 @@ def test_text_file_uses_lf(tmp_path: Path):
 @pytest.fixture(scope="module")
 def plain_gif(long_video: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("plain") / "plain.gif"
-    return convert_to_gif(long_video, out, GifOptions(fps=10, width=FRAME_W))
+    return convert_video(long_video, out, GifOptions(fps=10, width=FRAME_W))
 
 
 def test_bundled_font_exists():
@@ -179,7 +179,7 @@ def test_bundled_font_exists():
 
 def test_cyrillic_text_is_drawn(long_video: Path, plain_gif: Path, tmp_path: Path):
     overlay = TextOverlay("Привіт, ҐЄЇ!", font_size=24, position=TextPosition.BOTTOM, box=True)
-    out = convert_to_gif(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
+    out = convert_video(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
     with_text, without = gray_frame(out, 1), gray_frame(plain_gif, 1)
     bottom = (FRAME_H - 40, FRAME_H)
     assert changed_pixels(rows(with_text, *bottom), rows(without, *bottom)) > 200
@@ -189,7 +189,7 @@ def test_cyrillic_text_is_drawn(long_video: Path, plain_gif: Path, tmp_path: Pat
 
 def test_text_shown_only_in_time_range(long_video: Path, plain_gif: Path, tmp_path: Path):
     overlay = TextOverlay("TEXT", font_size=40, position=TextPosition.CENTER, start=1, end=2)
-    out = convert_to_gif(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
+    out = convert_video(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
     for at, visible in ((0.5, False), (1.5, True), (3, False)):
         diff = changed_pixels(gray_frame(out, at), gray_frame(plain_gif, at))
         assert (diff > 200) is visible, f"t={at}: {diff} changed pixels"
@@ -203,5 +203,5 @@ def test_font_path_with_special_characters(
     font = Path(shutil.copy(settings.font_file, font_dir / "font.ttf"))
     monkeypatch.setattr(converter, "settings", dataclasses.replace(settings, font_file=font))
     overlay = TextOverlay("50% 'off' %{pts}", font_size=20, position=TextPosition.TOP)
-    out = convert_to_gif(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
+    out = convert_video(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
     assert changed_pixels(gray_frame(out, 1), gray_frame(plain_gif, 1)) > 100

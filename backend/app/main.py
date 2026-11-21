@@ -29,8 +29,9 @@ from app.converter import (
     MIN_WIDTH,
     ConversionError,
     GifOptions,
+    OutputFormat,
     TrimRange,
-    convert_to_gif,
+    convert_video,
 )
 from app.estimate import (
     Clip,
@@ -118,6 +119,10 @@ class ConversionParams:
 
 
 def conversion_params(
+    format: Annotated[
+        OutputFormat,
+        Form(description="Output format. colors applies only to GIF; lossy to every format"),
+    ] = OutputFormat.GIF,
     preset: Annotated[
         CompressionPreset | None,
         Form(description="Compression preset; fps, width, colors and lossy override it"),
@@ -140,14 +145,19 @@ def conversion_params(
     lossy: Annotated[
         int | None,
         Form(
-            ge=MIN_LOSSY, le=MAX_LOSSY, description="gifsicle lossy level, 0 for none (default 0)"
+            ge=MIN_LOSSY,
+            le=MAX_LOSSY,
+            description=(
+                "Compression level, 0 for none (default 0): gifsicle's lossy level for GIF, "
+                "lower quality for WebP and MP4"
+            ),
         ),
     ] = None,
     target_size_kb: Annotated[
         int | None,
         Form(
             ge=MIN_TARGET_KB,
-            description="Largest allowed GIF size in KB; settings are lowered until it fits",
+            description="Largest allowed file size in KB; settings are lowered until it fits",
         ),
     ] = None,
     start: Annotated[
@@ -203,7 +213,9 @@ def conversion_params(
     ] = None,
 ) -> ConversionParams:
     try:
-        options = resolve_options(preset, fps=fps, width=width, colors=colors, lossy=lossy)
+        options = resolve_options(
+            preset, fps=fps, width=width, colors=colors, lossy=lossy, format=format
+        )
         trim = TrimRange(start=start or 0.0, end=end, duration=duration)
         overlay = None
         if text and text.strip():
@@ -244,17 +256,18 @@ def list_presets() -> dict[str, GifSettings]:
 @app.post(
     "/api/convert",
     response_class=FileResponse,
-    responses={200: {"content": {"image/gif": {}}}},
+    responses={200: {"content": {"image/gif": {}, "image/webp": {}, "video/mp4": {}}}},
 )
 def convert(file: Video, params: Params) -> FileResponse:
-    """Convert a video to GIF.
+    """Convert a video to GIF, WebP or MP4.
 
     The settings actually used are returned in the ``X-Gif-*`` headers, which
     matters in target size mode.
     """
     workdir = new_workdir()
     cleanup = BackgroundTask(shutil.rmtree, workdir, ignore_errors=True)
-    dst = workdir / "output.gif"
+    output_format = params.options.format
+    dst = workdir / f"output.{output_format.extension}"
     try:
         src = workdir / "input"
         _save_upload(file, src)
@@ -264,7 +277,7 @@ def convert(file: Video, params: Params) -> FileResponse:
             if params.target_bytes is not None:
                 options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
             else:
-                convert_to_gif(src, dst, options, params.trim, params.overlay)
+                convert_video(src, dst, options, params.trim, params.overlay)
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
@@ -278,8 +291,8 @@ def convert(file: Video, params: Params) -> FileResponse:
     stem = Path(file.filename or "video").stem or "video"
     return FileResponse(
         dst,
-        media_type="image/gif",
-        filename=f"{stem}.gif",
+        media_type=output_format.media_type,
+        filename=f"{stem}.{output_format.extension}",
         headers=_settings_headers(options),
         background=cleanup,
     )
@@ -287,7 +300,7 @@ def convert(file: Video, params: Params) -> FileResponse:
 
 @app.post("/api/estimate")
 def estimate(file: Video, params: Params) -> SizeEstimateResponse:
-    """Predict the GIF size for these settings without returning the GIF.
+    """Predict the file size for these settings without returning the file.
 
     With ``target_size_kb``, returns the settings that would be chosen to fit it.
     Long clips are sampled, so the size is approximate unless ``exact`` is true.
@@ -332,7 +345,7 @@ def _clip(src: Path, params: ConversionParams) -> Clip:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"The GIF would be {clip.length:.1f} s long, the limit is {limit:g} s. "
+                f"The clip would be {clip.length:.1f} s long, the limit is {limit:g} s. "
                 "Choose a shorter part of the video"
             ),
         )
