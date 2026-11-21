@@ -10,8 +10,8 @@ export const MESSAGES: Record<Language, Messages> = { en, uk };
 
 /** How each language is named in itself, plus a short label for the switcher. */
 export const LANGUAGE_NAMES: Record<Language, { name: string; short: string }> = {
-  en: { name: "English", short: "EN" },
-  uk: { name: "Українська", short: "UA" },
+  en: { name: "English", short: "ENG" },
+  uk: { name: "Українська", short: "УКР" },
 };
 
 export const STORAGE_KEY = "simple-gif-editor.language";

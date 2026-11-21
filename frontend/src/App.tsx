@@ -1,73 +1,78 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CompressionPanel } from "./components/CompressionPanel";
-import { EstimatePanel } from "./components/EstimatePanel";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ExportMenu, type ConvertState } from "./components/ExportMenu";
 import { FilePicker } from "./components/FilePicker";
+import { DownloadIcon, FilmIcon, LogoMark } from "./components/Icons";
 import { LanguageSwitcher } from "./components/LanguageSwitcher";
-import { ResultPanel } from "./components/ResultPanel";
-import { TextPanel } from "./components/TextPanel";
-import { TrimPanel } from "./components/TrimPanel";
-import { VideoPreview, type VideoPreviewHandle } from "./components/VideoPreview";
+import { PlayerControls } from "./components/PlayerControls";
+import { CAPTION_INPUT_ID, TextPanel } from "./components/TextPanel";
+import { Timeline } from "./components/Timeline";
+import { VideoPreview, type VideoMetadata, type VideoPreviewHandle } from "./components/VideoPreview";
 import { useEstimate } from "./hooks/useEstimate";
 import { useObjectUrl } from "./hooks/useObjectUrl";
 import { useI18n } from "./i18n/I18nProvider";
-import {
-  convertVideo,
-  describeError,
-  fetchPresets,
-  isAbort,
-  type ConvertResult,
-  type PresetTable,
-} from "./lib/api";
-import { formatBytes } from "./lib/format";
+import { convertVideo, fetchPresets, isAbort, type ConvertResult, type PresetTable } from "./lib/api";
+import { formatBytes, formatTimecode } from "./lib/format";
 import {
   DEFAULT_SETTINGS,
   DEFAULT_WIDTH,
+  clipLength,
   toFormFields,
   validate,
   type EditorSettings,
 } from "./lib/settings";
 
-type ConvertState =
-  | { status: "idle" }
-  | { status: "uploading"; progress: number }
-  | { status: "converting" }
-  | { status: "error"; error: unknown };
+/** The player's frame buttons step by one frame of 30 fps video. */
+const FRAME_STEP = 1 / 30;
 
 export default function App() {
   const { t } = useI18n();
   const [file, setFile] = useState<File | null>(null);
-  const [duration, setDuration] = useState<number | null>(null);
+  const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [unplayable, setUnplayable] = useState(false);
+  const [time, setTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
   const [settings, setSettings] = useState<EditorSettings>(DEFAULT_SETTINGS);
   const [presets, setPresets] = useState<PresetTable | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const [convertState, setConvertState] = useState<ConvertState>({ status: "idle" });
   const [result, setResult] = useState<{ result: ConvertResult; elapsedMs: number } | null>(null);
   const conversion = useRef<AbortController | null>(null);
   const preview = useRef<VideoPreviewHandle>(null);
+  const exportButton = useRef<HTMLButtonElement>(null);
   const videoUrl = useObjectUrl(file);
+  const duration = metadata?.duration ?? null;
 
   useEffect(() => {
     const controller = new AbortController();
     fetchPresets(controller.signal)
       .then(setPresets)
       .catch(() => {
-        // The preset cards just show no numbers; converting still works.
+        // The quality cards just show no numbers; converting still works.
       });
     return () => controller.abort();
   }, []);
 
-  const update = (patch: Partial<EditorSettings>) =>
-    setSettings((current) => ({ ...current, ...patch }));
+  const update = useCallback(
+    (patch: Partial<EditorSettings>) => setSettings((current) => ({ ...current, ...patch })),
+    [],
+  );
 
   const chooseFile = (next: File) => {
     conversion.current?.abort();
     setFile(next);
-    setDuration(null);
+    setMetadata(null);
     setUnplayable(false);
+    setTime(0);
+    setPlaying(false);
     setResult(null);
     setConvertState({ status: "idle" });
     setSettings((current) => ({ ...current, start: 0, end: null, textStart: null, textEnd: null }));
   };
+
+  const closeExport = useCallback(() => {
+    setExportOpen(false);
+    exportButton.current?.focus();
+  }, []);
 
   const errors = useMemo(
     () => validate(settings, duration, t.validation),
@@ -77,7 +82,8 @@ export default function App() {
   // Wait for the video's duration so the trim range is checked before uploading.
   const ready = file !== null && (duration !== null || unplayable);
   const busy = convertState.status === "uploading" || convertState.status === "converting";
-  const estimate = useEstimate(file, fields, ready && errors.length === 0);
+  // Estimating uploads the video, so only do it while the export menu is open.
+  const estimate = useEstimate(file, fields, exportOpen && !result && ready && errors.length === 0);
 
   const gifWidth =
     settings.overrides.width ??
@@ -110,120 +116,131 @@ export default function App() {
     }
   };
 
+  const seek = (seconds: number) => preview.current?.seek(seconds);
+  const fileInfo = file && [
+    duration !== null ? formatTimecode(duration) : null,
+    metadata && metadata.width > 0 ? `${metadata.width} × ${metadata.height}` : null,
+    formatBytes(file.size, t.units),
+  ];
+
   return (
-    <div className="app">
+    <div className={`app${file ? " has-file" : ""}`}>
       <header className="app-header">
-        <div>
-          <h1>{t.app.title}</h1>
-          <p className="muted">{t.app.tagline}</p>
+        <div className="header-start">
+          <div className="brand">
+            <LogoMark />
+            <h1>{t.app.title}</h1>
+          </div>
+          {file && (
+            <>
+              <div className="header-divider" aria-hidden />
+              <div className="file-info">
+                <FilmIcon size={18} />
+                <span className="file-name" title={file.name}>
+                  {file.name}
+                </span>
+                <span className="file-meta mono">{fileInfo?.filter(Boolean).join(" · ")}</span>
+                <FilePicker onFile={chooseFile} compact />
+              </div>
+            </>
+          )}
         </div>
-        <LanguageSwitcher />
+        <div className="header-end">
+          <LanguageSwitcher />
+          <div className="export-anchor">
+            <button
+              ref={exportButton}
+              type="button"
+              className="button primary"
+              aria-expanded={exportOpen}
+              aria-haspopup="dialog"
+              disabled={!file}
+              onClick={() => setExportOpen((open) => !open)}
+            >
+              <DownloadIcon size={18} />
+              <span>{t.header.export}</span>
+              {(busy || result) && <span className="export-dot" aria-hidden />}
+            </button>
+            {exportOpen && file && (
+              <ExportMenu
+                settings={settings}
+                presets={presets}
+                onChange={update}
+                estimate={estimate}
+                videoSize={metadata && metadata.width > 0 ? metadata : null}
+                clipLength={clipLength(settings, duration)}
+                errors={errors}
+                canConvert={ready && errors.length === 0}
+                convertState={convertState}
+                onConvert={convert}
+                onCancel={() => conversion.current?.abort()}
+                result={result}
+                onDismissResult={() => setResult(null)}
+                onClose={closeExport}
+              />
+            )}
+          </div>
+        </div>
       </header>
+
+      {exportOpen && file && (
+        <button
+          type="button"
+          className="backdrop"
+          aria-label={t.exporter.closeMenu}
+          tabIndex={-1}
+          onClick={closeExport}
+        />
+      )}
 
       {!file || !videoUrl ? (
         <main className="empty">
           <FilePicker onFile={chooseFile} />
         </main>
       ) : (
-        <main className="editor">
-          <div className="column">
-            <section className="panel">
-              <div className="panel-header">
-                <h2 className="filename" title={file.name}>
-                  {file.name}
-                </h2>
-                <span className="badge">{formatBytes(file.size, t.units)}</span>
+        <>
+          <div className="workspace">
+            <main className="stage-column">
+              <div className="stage">
+                {unplayable ? (
+                  <div className="notice">{t.app.unplayable}</div>
+                ) : (
+                  <VideoPreview
+                    ref={preview}
+                    src={videoUrl}
+                    settings={settings}
+                    gifWidth={gifWidth}
+                    onMetadata={setMetadata}
+                    onTime={setTime}
+                    onPlayingChange={setPlaying}
+                    onUnplayable={() => setUnplayable(true)}
+                  />
+                )}
               </div>
-              {unplayable ? (
-                <div className="notice">{t.app.unplayable}</div>
-              ) : (
-                <VideoPreview
-                  ref={preview}
-                  src={videoUrl}
-                  settings={settings}
-                  gifWidth={gifWidth}
-                  onDuration={setDuration}
-                  onUnplayable={() => setUnplayable(true)}
-                />
-              )}
-              <FilePicker onFile={chooseFile} compact />
-            </section>
-            <TrimPanel
-              settings={settings}
-              duration={duration}
-              onChange={update}
-              onSeek={(seconds) => preview.current?.seek(seconds)}
-              currentTime={() => preview.current?.currentTime() ?? settings.start}
-            />
-          </div>
-
-          <div className="column">
-            <TextPanel settings={settings} onChange={update} />
-            <CompressionPanel settings={settings} presets={presets} onChange={update} />
-
-            <section className="panel actions">
-              <EstimatePanel state={estimate} targetMode={settings.mode === "target"} />
-              {errors.length > 0 && (
-                <ul className="problems" role="alert">
-                  {errors.map((error) => (
-                    <li key={error}>{error}</li>
-                  ))}
-                </ul>
-              )}
-              {convertState.status === "error" && (
-                <div className="estimate error" role="alert">
-                  <strong>{t.app.conversionFailed}</strong>
-                  <span>{describeError(convertState.error, t.errors)}</span>
-                </div>
-              )}
-              {busy ? (
-                <div className="progress-row">
-                  <div className="progress">
-                    <div
-                      className={`progress-bar${convertState.status === "converting" ? " indeterminate" : ""}`}
-                      style={
-                        convertState.status === "uploading"
-                          ? { width: `${Math.round(convertState.progress * 100)}%` }
-                          : undefined
-                      }
-                    />
-                  </div>
-                  <span className="small">
-                    {convertState.status === "uploading"
-                      ? t.app.uploading(Math.round(convertState.progress * 100))
-                      : t.app.converting}
-                  </span>
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() => conversion.current?.abort()}
-                  >
-                    {t.app.cancel}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="button primary"
-                  disabled={!ready || errors.length > 0}
-                  onClick={convert}
-                >
-                  {t.app.convert}
-                </button>
-              )}
-            </section>
-          </div>
-
-          {result && (
-            <div className="full">
-              <ResultPanel
-                result={result.result}
-                elapsedMs={result.elapsedMs}
-                onDismiss={() => setResult(null)}
+              <PlayerControls
+                time={time}
+                duration={duration}
+                playing={playing}
+                disabled={unplayable || duration === null}
+                onTogglePlay={() => preview.current?.togglePlay()}
+                onStep={(direction) => preview.current?.step(direction * FRAME_STEP)}
               />
-            </div>
-          )}
-        </main>
+            </main>
+
+            <aside className="sidebar">
+              <TextPanel settings={settings} onChange={update} />
+            </aside>
+          </div>
+
+          <Timeline
+            settings={settings}
+            duration={duration}
+            time={time}
+            onChange={update}
+            onSeek={seek}
+            onTextClick={() => document.getElementById(CAPTION_INPUT_ID)?.focus()}
+          />
+        </>
       )}
     </div>
   );
