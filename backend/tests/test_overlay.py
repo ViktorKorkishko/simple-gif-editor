@@ -1,4 +1,6 @@
 import dataclasses
+import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,7 +10,14 @@ import pytest
 from app import converter
 from app.config import settings
 from app.converter import GifOptions, build_filtergraph, convert_video
-from app.overlay import TextOverlay, TextPosition, escape_filter_value, is_valid_color
+from app.overlay import (
+    MAX_TEXT_LAYERS,
+    TextOverlay,
+    TextPosition,
+    escape_filter_value,
+    is_valid_color,
+    parse_text_layers,
+)
 
 FRAME_W, FRAME_H = 160, 120
 
@@ -164,6 +173,38 @@ def test_text_file_uses_lf(tmp_path: Path):
     assert path.read_text(encoding="utf-8") == "один\nдва\nтри"
 
 
+def test_parse_text_layers():
+    overlays = parse_text_layers(
+        json.dumps(
+            [
+                {"text": "Top", "position": "top", "size": 20, "start": 1},
+                {"text": "   "},
+                {"text": "Bottom", "box": True, "box_color": "black@0.3"},
+            ]
+        )
+    )
+    assert [o.text for o in overlays] == ["Top", "Bottom"]
+    assert overlays[0].position is TextPosition.TOP
+    assert overlays[0].font_size == 20 and overlays[0].start == 1
+    assert overlays[1].box and overlays[1].box_color == "black@0.3"
+
+
+@pytest.mark.parametrize(
+    "raw, message",
+    [
+        ("not json", "JSON array"),
+        ('{"text": "a"}', "list"),
+        ('[{"text": "a", "colour": "red"}]', "texts[0.colour]"),
+        ('[{"text": "a", "size": "big"}]', "texts[0.size]"),
+        ('[{"text": "a"}, {"text": "b", "size": 999}]', "text layer 2: font size"),
+        (json.dumps([{"text": "a"}] * (MAX_TEXT_LAYERS + 1)), "at most"),
+    ],
+)
+def test_parse_text_layers_rejects(raw, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
+        parse_text_layers(raw)
+
+
 # --- rendering ------------------------------------------------------------------
 
 
@@ -173,13 +214,17 @@ def plain_gif(long_video: Path, tmp_path_factory: pytest.TempPathFactory) -> Pat
     return convert_video(long_video, out, GifOptions(fps=10, width=FRAME_W))
 
 
+def render(video: Path, tmp_path: Path, *overlays: TextOverlay) -> Path:
+    return convert_video(video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlays=overlays)
+
+
 def test_bundled_font_exists():
     assert settings.font_file.is_file()
 
 
 def test_cyrillic_text_is_drawn(long_video: Path, plain_gif: Path, tmp_path: Path):
     overlay = TextOverlay("Привіт, ҐЄЇ!", font_size=24, position=TextPosition.BOTTOM, box=True)
-    out = convert_video(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
+    out = render(long_video, tmp_path, overlay)
     with_text, without = gray_frame(out, 1), gray_frame(plain_gif, 1)
     bottom = (FRAME_H - 40, FRAME_H)
     assert changed_pixels(rows(with_text, *bottom), rows(without, *bottom)) > 200
@@ -189,7 +234,7 @@ def test_cyrillic_text_is_drawn(long_video: Path, plain_gif: Path, tmp_path: Pat
 
 def test_text_shown_only_in_time_range(long_video: Path, plain_gif: Path, tmp_path: Path):
     overlay = TextOverlay("TEXT", font_size=40, position=TextPosition.CENTER, start=1, end=2)
-    out = convert_video(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
+    out = render(long_video, tmp_path, overlay)
     for at, visible in ((0.5, False), (1.5, True), (3, False)):
         diff = changed_pixels(gray_frame(out, at), gray_frame(plain_gif, at))
         assert (diff > 200) is visible, f"t={at}: {diff} changed pixels"
@@ -203,5 +248,14 @@ def test_font_path_with_special_characters(
     font = Path(shutil.copy(settings.font_file, font_dir / "font.ttf"))
     monkeypatch.setattr(converter, "settings", dataclasses.replace(settings, font_file=font))
     overlay = TextOverlay("50% 'off' %{pts}", font_size=20, position=TextPosition.TOP)
-    out = convert_video(long_video, tmp_path / "t.gif", GifOptions(width=FRAME_W), overlay=overlay)
+    out = render(long_video, tmp_path, overlay)
     assert changed_pixels(gray_frame(out, 1), gray_frame(plain_gif, 1)) > 100
+
+
+def test_several_layers_are_drawn(long_video: Path, plain_gif: Path, tmp_path: Path):
+    top = TextOverlay("TOP", font_size=24, position=TextPosition.TOP)
+    bottom = TextOverlay("BOTTOM", font_size=24, position=TextPosition.BOTTOM)
+    out = render(long_video, tmp_path, top, bottom)
+    with_text, without = gray_frame(out, 1), gray_frame(plain_gif, 1)
+    for band in ((0, 40), (FRAME_H - 40, FRAME_H)):
+        assert changed_pixels(rows(with_text, *band), rows(without, *band)) > 100
