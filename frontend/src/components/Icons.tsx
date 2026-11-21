@@ -55,6 +55,7 @@ export const GlobeIcon = icon(
 export const DownloadIcon = icon(<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14" />);
 export const UploadIcon = icon(<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 19h14" />);
 export const CloseIcon = icon(<path d="M6 6l12 12M18 6 6 18" />);
+export const PlusIcon = icon(<path d="M12 5v14M5 12h14" />);
 export const TextIcon = icon(<path d="M5 6.5V5h14v1.5M12 5v14M9.5 19h5" />);
 export const TrashIcon = icon(
   <path d="M5 7h14M10 7V5h4v2M7 7l.8 12h8.4L17 7M10 11v5M14 11v5" />,

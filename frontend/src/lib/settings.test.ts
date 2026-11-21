@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { uk } from "../i18n/uk";
-import { DEFAULT_SETTINGS, clipLength, toFormFields, validate, type EditorSettings } from "./settings";
+import {
+  DEFAULT_SETTINGS,
+  clipLength,
+  newTextLayer,
+  toFormFields,
+  validate,
+  type EditorSettings,
+  type TextLayer,
+} from "./settings";
 
 const make = (patch: Partial<EditorSettings> = {}): EditorSettings => ({
   ...DEFAULT_SETTINGS,
@@ -40,22 +48,36 @@ describe("toFormFields", () => {
     expect(webp).not.toHaveProperty("colors");
   });
 
-  it("sends text fields only when there is text", () => {
-    expect(toFormFields(make({ text: "   " }), 10)).not.toHaveProperty("text");
-    const fields = toFormFields(
-      make({ text: "Hi", textBox: true, textBoxColor: "#112233", textBoxOpacity: 0.3, textEnd: 2 }),
-      10,
-    );
-    expect(fields).toMatchObject({
-      text: "Hi",
-      text_size: "32",
-      text_color: "#ffffff",
-      text_position: "bottom",
-      text_box: "true",
-      text_box_color: "#112233@0.30",
-      text_end: "2",
-    });
-    expect(fields).not.toHaveProperty("text_start");
+  it("sends text layers with text as JSON", () => {
+    expect(toFormFields(make({ texts: [newTextLayer({ text: "   " })] }), 10)).not.toHaveProperty("texts");
+    const texts = [
+      newTextLayer({ text: "Hi", box: true, boxColor: "#112233", boxOpacity: 0.3, end: 2 }),
+      newTextLayer({ text: "" }),
+      newTextLayer({ text: "Bye", position: "top", start: 1.23456 }),
+    ];
+    const fields = toFormFields(make({ texts }), 10);
+    expect(JSON.parse(fields.texts)).toEqual([
+      {
+        text: "Hi",
+        size: 32,
+        color: "#ffffff",
+        position: "bottom",
+        outline: 2,
+        outline_color: "#000000",
+        box: true,
+        box_color: "#112233@0.30",
+        end: 2,
+      },
+      {
+        text: "Bye",
+        size: 32,
+        color: "#ffffff",
+        position: "top",
+        outline: 2,
+        outline_color: "#000000",
+        start: 1.235,
+      },
+    ]);
   });
 });
 
@@ -73,14 +95,20 @@ describe("validate", () => {
   });
 
   it("checks text timing against the clip length", () => {
-    expect(validate(make({ text: "a", start: 2, end: 4, textStart: 3 }), 10)).toContain(
+    const layer = (patch: Partial<TextLayer>) => [newTextLayer({ text: "a", ...patch })];
+    expect(validate(make({ start: 2, end: 4, texts: layer({ start: 3 }) }), 10)).toContain(
       "Text must appear before the GIF ends.",
     );
-    expect(validate(make({ text: "a", textStart: 2, textEnd: 1 }), 10)).toContain(
+    expect(validate(make({ texts: layer({ start: 2, end: 1 }) }), 10)).toContain(
       "Text must disappear after it appears.",
     );
     // Timing is ignored when there is no caption.
-    expect(validate(make({ textStart: 2, textEnd: 1 }), 10)).toEqual([]);
+    expect(validate(make({ texts: layer({ text: "", start: 2, end: 1 }) }), 10)).toEqual([]);
+  });
+
+  it("names the layer when there are several", () => {
+    const texts = [newTextLayer({ text: "a" }), newTextLayer({ text: "b", size: 500 })];
+    expect(validate(make({ texts }), 10)).toEqual(["Text 2: Font size must be between 8 and 200."]);
   });
 
   it("checks overrides and the target size", () => {

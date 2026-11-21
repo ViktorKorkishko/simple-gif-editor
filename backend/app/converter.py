@@ -6,6 +6,7 @@ compression); WebP and MP4 use libwebp and libx264.
 
 import math
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -155,6 +156,8 @@ class TrimRange:
 def build_filtergraph(options: GifOptions, text_filter: str | None = None) -> str:
     """Filtergraph that turns the input into frames for ``options.format``.
 
+    ``text_filter`` is one or more drawtext filters joined with commas.
+
     For GIF, the video is split in two: one branch builds an optimal palette
     of up to ``options.colors`` colours for the whole clip, the other is
     mapped onto it. This gives far better colours than FFmpeg's default GIF
@@ -254,13 +257,17 @@ def convert_video(
     dst: Path,
     options: GifOptions | None = None,
     trim: TrimRange | None = None,
-    overlay: TextOverlay | None = None,
+    overlays: Sequence[TextOverlay] = (),
 ) -> Path:
+    """Render ``src`` to ``dst``; ``overlays`` are drawn in order, the last on top."""
     options = options or GifOptions()
-    text_filter = None
-    if overlay is not None:
-        text_file = overlay.write_text_file(dst.with_name(f"{dst.stem}-text.txt"))
-        text_filter = overlay.to_filter(text_file, settings.font_file)
+    text_filters = [
+        overlay.to_filter(
+            overlay.write_text_file(dst.with_name(f"{dst.stem}-text-{i}.txt")), settings.font_file
+        )
+        for i, overlay in enumerate(overlays)
+    ]
+    text_filter = ",".join(text_filters) or None
     # With lossy GIF compression, FFmpeg writes an intermediate GIF for gifsicle.
     use_gifsicle = options.format is OutputFormat.GIF and options.lossy > 0
     ffmpeg_dst = dst.with_name(f"{dst.stem}-ffmpeg.gif") if use_gifsicle else dst

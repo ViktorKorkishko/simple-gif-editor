@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -157,6 +158,35 @@ def test_convert_rejects_bad_text_options(client, sample_video: Path, fields, me
 def test_convert_rejects_out_of_range_text_fields(client, sample_video: Path, fields):
     resp = post_trim(client, sample_video, **{"text": "hi", **fields})
     assert resp.status_code == 422
+
+
+def test_convert_with_text_layers(client, long_video: Path):
+    layers = [
+        {"text": "Top", "position": "top", "end": 1},
+        {"text": "Bottom", "color": "#ffcc00", "box": True, "start": 0.5},
+    ]
+    resp = post_trim(client, long_video, end=2, text="Plain", texts=json.dumps(layers))
+    assert resp.status_code == 200, resp.text
+    assert resp.content[:6] == b"GIF89a"
+
+
+def test_estimate_with_text_layers(client, sampled_video: Path):
+    layers = json.dumps([{"text": "A", "start": 3}, {"text": "B", "end": 1}])
+    resp = post_form(client, "/api/estimate", sampled_video, width=80, texts=layers)
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.parametrize(
+    "texts, message",
+    [
+        ("[{]", "JSON array"),
+        ('[{"text": "a", "color": "red:x=0"}]', "text layer 1: text color"),
+    ],
+)
+def test_convert_rejects_bad_text_layers(client, sample_video: Path, texts, message):
+    resp = post_trim(client, sample_video, texts=texts)
+    assert resp.status_code == 422
+    assert message in resp.json()["detail"]
 
 
 def post_form(client, endpoint: str, video: Path, **fields):
