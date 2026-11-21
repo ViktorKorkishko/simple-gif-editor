@@ -16,9 +16,11 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_WIDTH,
   clipLength,
+  newTextLayer,
   toFormFields,
   validate,
   type EditorSettings,
+  type TextLayer,
 } from "./lib/settings";
 
 /** The player's frame buttons step by one frame of 30 fps video. */
@@ -32,6 +34,7 @@ export default function App() {
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [settings, setSettings] = useState<EditorSettings>(DEFAULT_SETTINGS);
+  const [selectedText, setSelectedText] = useState<string | null>(DEFAULT_SETTINGS.texts[0]?.id ?? null);
   const [presets, setPresets] = useState<PresetTable | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [convertState, setConvertState] = useState<ConvertState>({ status: "idle" });
@@ -66,8 +69,32 @@ export default function App() {
     setPlaying(false);
     setResult(null);
     setConvertState({ status: "idle" });
-    setSettings((current) => ({ ...current, start: 0, end: null, textStart: null, textEnd: null }));
+    setSettings((current) => ({
+      ...current,
+      start: 0,
+      end: null,
+      texts: current.texts.map((layer) => ({ ...layer, start: null, end: null })),
+    }));
   };
+
+  const focusCaption = () => requestAnimationFrame(() => document.getElementById(CAPTION_INPUT_ID)?.focus());
+  const addText = () => {
+    const layer = newTextLayer();
+    setSettings((current) => ({ ...current, texts: [...current.texts, layer] }));
+    setSelectedText(layer.id);
+    focusCaption();
+  };
+  const removeText = (id: string) => {
+    const index = settings.texts.findIndex((layer) => layer.id === id);
+    const rest = settings.texts.filter((layer) => layer.id !== id);
+    update({ texts: rest });
+    if (selectedText === id) setSelectedText(rest[Math.min(index, rest.length - 1)]?.id ?? null);
+  };
+  const changeText = (id: string, patch: Partial<TextLayer>) =>
+    setSettings((current) => ({
+      ...current,
+      texts: current.texts.map((layer) => (layer.id === id ? { ...layer, ...patch } : layer)),
+    }));
 
   const closeExport = useCallback(() => {
     setExportOpen(false);
@@ -228,7 +255,14 @@ export default function App() {
             </main>
 
             <aside className="sidebar">
-              <TextPanel settings={settings} onChange={update} />
+              <TextPanel
+                texts={settings.texts}
+                selectedId={selectedText}
+                onSelect={setSelectedText}
+                onAdd={addText}
+                onRemove={removeText}
+                onChange={changeText}
+              />
             </aside>
           </div>
 
@@ -238,7 +272,11 @@ export default function App() {
             time={time}
             onChange={update}
             onSeek={seek}
-            onTextClick={() => document.getElementById(CAPTION_INPUT_ID)?.focus()}
+            selectedText={selectedText}
+            onTextClick={(id) => {
+              setSelectedText(id);
+              focusCaption();
+            }}
           />
         </>
       )}
