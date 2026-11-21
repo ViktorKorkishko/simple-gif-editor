@@ -112,7 +112,7 @@ def test_estimate_respects_trim(sampled_video: Path, tmp_path: Path):
 
 def test_estimate_with_timed_text(sampled_video: Path, tmp_path: Path):
     overlay = TextOverlay(text="hello", start=1, end=2)
-    result = estimate_size(Clip(sampled_video, 0, 8.0, overlay), GifOptions(width=80), tmp_path)
+    result = estimate_size(Clip(sampled_video, 0, 8.0, (overlay,)), GifOptions(width=80), tmp_path)
     assert result.bytes > 0
 
 

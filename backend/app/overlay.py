@@ -1,15 +1,20 @@
 """Text overlay rendered with FFmpeg's ``drawtext`` filter."""
 
-import math
+import json
 import re
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+
+from app.timing import check_time_range, enable_expression, enable_option, shift_range
+
 MAX_TEXT_LENGTH = 500
 MIN_FONT_SIZE, MAX_FONT_SIZE = 8, 200
 MAX_OUTLINE = 10
 MAX_OFFSET = 4000
+MAX_TEXT_LAYERS = 10
 # Gap between the text and the edge of the frame for the position presets, in px.
 EDGE_MARGIN = 10
 # Padding around the text inside the background box, in px.
@@ -118,11 +123,7 @@ class TextOverlay:
         for name, offset in (("x", self.x), ("y", self.y)):
             if offset is not None and not 0 <= offset <= MAX_OFFSET:
                 raise ValueError(f"{name} must be between 0 and {MAX_OFFSET}")
-        for name, t in (("text start", self.start), ("text end", self.end)):
-            if t is not None and (not math.isfinite(t) or t < 0):
-                raise ValueError(f"{name} must be a non-negative number")
-        if self.start is not None and self.end is not None and self.end <= self.start:
-            raise ValueError("text end must be greater than text start")
+        check_time_range("text", self.start, self.end)
 
     @property
     def coordinates(self) -> tuple[str, str]:
@@ -134,13 +135,7 @@ class TextOverlay:
     @property
     def enable_expression(self) -> str | None:
         """drawtext ``enable`` expression for the time range, if one is set."""
-        if self.start is None and self.end is None:
-            return None
-        if self.end is None:
-            return f"gte(t,{self.start:g})"
-        if self.start is None:
-            return f"lt(t,{self.end:g})"
-        return f"between(t,{self.start:g},{self.end:g})"
+        return enable_expression(self.start, self.end)
 
     def to_filter(self, text_file: Path, font_file: Path) -> str:
         """Build the drawtext filter.
@@ -162,10 +157,7 @@ class TextOverlay:
             options += [f"borderw={self.outline}", f"bordercolor={self.outline_color}"]
         if self.box:
             options += ["box=1", f"boxcolor={self.box_color}", f"boxborderw={BOX_PADDING}"]
-        enable = self.enable_expression
-        if enable is not None:
-            # The commas inside the expression would otherwise split the graph.
-            options.append(f"enable='{enable}'")
+        options += enable_option(self.start, self.end)
         return "drawtext=" + ":".join(options)
 
     def shifted(self, offset: float, length: float) -> "TextOverlay | None":
@@ -176,13 +168,76 @@ class TextOverlay:
         """
         if self.start is None and self.end is None:
             return self
-        start = (self.start or 0.0) - offset
-        end = None if self.end is None else self.end - offset
-        if start >= length or (end is not None and end <= 0):
+        shifted = shift_range(self.start, self.end, offset, length)
+        if shifted is None:
             return None
-        return replace(self, start=start if start > 0 else None, end=end)
+        return replace(self, start=shifted[0], end=shifted[1])
 
     def write_text_file(self, path: Path) -> Path:
         """Save the text for drawtext's ``textfile`` option (UTF-8, LF newlines)."""
         path.write_text(self.text.replace("\r\n", "\n").replace("\r", "\n"), encoding="utf-8")
         return path
+
+
+class TextLayer(BaseModel):
+    """One entry of the ``texts`` form field, before range checks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    size: int = 32
+    color: str = "white"
+    position: TextPosition = TextPosition.BOTTOM
+    x: int | None = None
+    y: int | None = None
+    outline: int = 2
+    outline_color: str = "black"
+    box: bool = False
+    box_color: str = "black@0.5"
+    start: float | None = None
+    end: float | None = None
+
+    def to_overlay(self) -> TextOverlay:
+        return TextOverlay(
+            text=self.text,
+            font_size=self.size,
+            color=self.color,
+            position=self.position,
+            x=self.x,
+            y=self.y,
+            outline=self.outline,
+            outline_color=self.outline_color,
+            box=self.box,
+            box_color=self.box_color,
+            start=self.start,
+            end=self.end,
+        )
+
+
+_LAYERS = TypeAdapter(list[TextLayer])
+
+
+def parse_text_layers(raw: str) -> list[TextOverlay]:
+    """Overlays from a JSON array of text layers; blank texts are skipped.
+
+    Raises ``ValueError`` with a readable message for bad JSON or values.
+    """
+    try:
+        layers = _LAYERS.validate_python(json.loads(raw))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"texts must be a JSON array: {exc.msg}") from exc
+    except ValidationError as exc:
+        error = exc.errors()[0]
+        where = ".".join(str(part) for part in error["loc"])
+        raise ValueError(f"texts[{where}]: {error['msg']}" if where else error["msg"]) from exc
+    if len(layers) > MAX_TEXT_LAYERS:
+        raise ValueError(f"at most {MAX_TEXT_LAYERS} text layers are allowed")
+    overlays = []
+    for index, layer in enumerate(layers):
+        if not layer.text.strip():
+            continue
+        try:
+            overlays.append(layer.to_overlay())
+        except ValueError as exc:
+            raise ValueError(f"text layer {index + 1}: {exc}") from exc
+    return overlays

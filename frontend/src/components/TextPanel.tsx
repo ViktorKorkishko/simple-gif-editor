@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { TextIcon, TrashIcon } from "./Icons";
+import { PlusIcon, TextIcon, TrashIcon } from "./Icons";
 import { NumberField } from "./NumberField";
+import { SliderField } from "./SliderField";
 import { useI18n } from "../i18n/I18nProvider";
 import { formatTimecode } from "../lib/format";
-import { LIMITS, hasText, type EditorSettings, type TextPosition } from "../lib/settings";
+import { LIMITS, type TextLayer, type TextPosition } from "../lib/settings";
 
 interface Props {
-  settings: EditorSettings;
-  onChange: (patch: Partial<EditorSettings>) => void;
+  texts: TextLayer[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+  onChange: (id: string, patch: Partial<TextLayer>) => void;
 }
 
 export const CAPTION_INPUT_ID = "caption-text";
@@ -57,88 +62,81 @@ function HexInput({ value, label, onChange }: { value: string; label: string; on
   );
 }
 
-function SliderField({
-  id,
-  label,
-  value,
-  min,
-  max,
-  step = 1,
-  unit,
-  display,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  unit: string;
-  display?: string;
-  onChange: (value: number) => void;
-}) {
+export function TextPanel({ texts, selectedId, onSelect, onAdd, onRemove, onChange }: Props) {
+  const { t } = useI18n();
+  const selected = texts.find((layer) => layer.id === selectedId) ?? null;
+
+  const range = (layer: TextLayer) =>
+    layer.start === null && layer.end === null
+      ? null
+      : `${formatTimecode(layer.start ?? 0)} – ${
+          layer.end === null ? t.text.endPlaceholder : formatTimecode(layer.end)
+        }`;
+
   return (
-    <div className="field">
-      <div className="field-row">
-        <label htmlFor={id} className="field-label">
-          {label}
-        </label>
-        <span className="field-value mono">
-          {display ?? value} <span className="muted">{unit}</span>
-        </span>
-      </div>
-      <input
-        id={id}
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
+    <div className="side-panel">
+      <button
+        type="button"
+        className="button add-layer"
+        disabled={texts.length >= LIMITS.textLayers}
+        title={texts.length >= LIMITS.textLayers ? t.text.layerLimit(LIMITS.textLayers) : undefined}
+        onClick={onAdd}
+      >
+        <PlusIcon />
+        <span>{t.text.add}</span>
+      </button>
+
+      {texts.length > 0 && (
+        <ul className="layer-list" aria-label={t.text.layers}>
+          {texts.map((layer) => {
+            const meta = range(layer);
+            return (
+              <li key={layer.id} className={`layer-card${layer.id === selectedId ? " selected" : ""}`}>
+                <button
+                  type="button"
+                  className="layer-card-select"
+                  aria-pressed={layer.id === selectedId}
+                  onClick={() => onSelect(layer.id)}
+                >
+                  <TextIcon />
+                  <span className="layer-card-body">
+                    <span className={`layer-card-title${layer.text.trim() ? "" : " muted"}`}>
+                      {layer.text.trim() || t.text.empty}
+                    </span>
+                    {meta && <span className="layer-card-meta mono">{meta}</span>}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="icon-button ghost"
+                  aria-label={t.text.remove}
+                  title={t.text.remove}
+                  onClick={() => onRemove(layer.id)}
+                >
+                  <TrashIcon />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {selected ? (
+        <LayerEditor layer={selected} onChange={(patch) => onChange(selected.id, patch)} />
+      ) : (
+        <p className="note">{t.text.noLayers}</p>
+      )}
     </div>
   );
 }
 
-export function TextPanel({ settings, onChange }: Props) {
+function LayerEditor({ layer, onChange }: { layer: TextLayer; onChange: (patch: Partial<TextLayer>) => void }) {
   const { t } = useI18n();
-  const enabled = hasText(settings);
-  const color = settings.textColor.toLowerCase();
-
-  const range =
-    settings.textStart === null && settings.textEnd === null
-      ? null
-      : `${formatTimecode(settings.textStart ?? 0)} – ${
-          settings.textEnd === null ? t.text.endPlaceholder : formatTimecode(settings.textEnd)
-        }`;
+  const enabled = layer.text.trim().length > 0;
+  const color = layer.color.toLowerCase();
 
   return (
-    <div className="text-panel">
-      <h2 className="sidebar-title">
-        <TextIcon />
-        <span>{t.text.title}</span>
-      </h2>
-
-      {enabled && (
-        <div className="layer-card">
-          <TextIcon />
-          <div className="layer-card-body">
-            <span className="layer-card-title">{settings.text}</span>
-            {range && <span className="layer-card-meta mono">{range}</span>}
-          </div>
-          <button
-            type="button"
-            className="icon-button ghost"
-            aria-label={t.text.remove}
-            title={t.text.remove}
-            onClick={() => onChange({ text: "" })}
-          >
-            <TrashIcon />
-          </button>
-        </div>
-      )}
-
+    <>
       <div className="field">
         <label htmlFor={CAPTION_INPUT_ID} className="field-label">
           {t.text.caption}
@@ -148,7 +146,7 @@ export function TextPanel({ settings, onChange }: Props) {
           rows={2}
           maxLength={LIMITS.textLength}
           placeholder={t.text.captionPlaceholder}
-          value={settings.text}
+          value={layer.text}
           onChange={(event) => onChange({ text: event.target.value })}
         />
       </div>
@@ -165,8 +163,8 @@ export function TextPanel({ settings, onChange }: Props) {
               min={0}
               step={0.1}
               placeholder={t.text.startPlaceholder}
-              value={settings.textStart}
-              onChange={(value) => onChange({ textStart: value })}
+              value={layer.start}
+              onChange={(value) => onChange({ start: value })}
             />
             <NumberField
               label={t.text.hideAt}
@@ -176,8 +174,8 @@ export function TextPanel({ settings, onChange }: Props) {
               min={0}
               step={0.1}
               placeholder={t.text.endPlaceholder}
-              value={settings.textEnd}
-              onChange={(value) => onChange({ textEnd: value })}
+              value={layer.end}
+              onChange={(value) => onChange({ end: value })}
             />
           </div>
         </div>
@@ -185,11 +183,11 @@ export function TextPanel({ settings, onChange }: Props) {
         <SliderField
           id="text-size"
           label={t.text.size}
-          value={settings.textSize}
+          value={layer.size}
           min={LIMITS.textSize[0]}
           max={LIMITS.textSize[1]}
           unit={t.units.px}
-          onChange={(textSize) => onChange({ textSize })}
+          onChange={(size) => onChange({ size })}
         />
 
         <div className="field">
@@ -204,18 +202,14 @@ export function TextPanel({ settings, onChange }: Props) {
                 aria-label={t.text.swatches[name]}
                 title={t.text.swatches[name]}
                 aria-pressed={color === hex}
-                onClick={() => onChange({ textColor: hex })}
+                onClick={() => onChange({ color: hex })}
               />
             ))}
             <label className="swatch custom" title={t.text.customColor} style={{ background: color }}>
               <span className="visually-hidden">{t.text.customColor}</span>
-              <input
-                type="color"
-                value={color}
-                onChange={(event) => onChange({ textColor: event.target.value })}
-              />
+              <input type="color" value={color} onChange={(event) => onChange({ color: event.target.value })} />
             </label>
-            <HexInput value={color} label={t.text.hexColor} onChange={(textColor) => onChange({ textColor })} />
+            <HexInput value={color} label={t.text.hexColor} onChange={(hex) => onChange({ color: hex })} />
           </div>
         </div>
 
@@ -231,10 +225,10 @@ export function TextPanel({ settings, onChange }: Props) {
                     key={position}
                     type="button"
                     role="radio"
-                    aria-checked={settings.textPosition === position}
+                    aria-checked={layer.position === position}
                     aria-label={t.text.positions[position]}
                     title={t.text.positions[position]}
-                    onClick={() => onChange({ textPosition: position })}
+                    onClick={() => onChange({ position })}
                   >
                     <span aria-hidden />
                   </button>
@@ -249,18 +243,18 @@ export function TextPanel({ settings, onChange }: Props) {
             <SliderField
               id="text-outline"
               label={t.text.outline}
-              value={settings.textOutline}
+              value={layer.outline}
               min={LIMITS.textOutline[0]}
               max={LIMITS.textOutline[1]}
               unit={t.units.px}
-              onChange={(textOutline) => onChange({ textOutline })}
+              onChange={(outline) => onChange({ outline })}
             />
             <label className="color-row">
               <input
                 type="color"
-                value={settings.textOutlineColor}
-                disabled={!enabled || settings.textOutline === 0}
-                onChange={(event) => onChange({ textOutlineColor: event.target.value })}
+                value={layer.outlineColor}
+                disabled={!enabled || layer.outline === 0}
+                onChange={(event) => onChange({ outlineColor: event.target.value })}
               />
               <span>{t.text.outlineColor}</span>
             </label>
@@ -268,38 +262,34 @@ export function TextPanel({ settings, onChange }: Props) {
         </div>
 
         <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={settings.textBox}
-            onChange={(event) => onChange({ textBox: event.target.checked })}
-          />
+          <input type="checkbox" checked={layer.box} onChange={(event) => onChange({ box: event.target.checked })} />
           <span>{t.text.backgroundBox}</span>
         </label>
-        {settings.textBox && (
+        {layer.box && (
           <div className="box-options">
             <label className="color-row">
               <input
                 type="color"
-                value={settings.textBoxColor}
-                onChange={(event) => onChange({ textBoxColor: event.target.value })}
+                value={layer.boxColor}
+                onChange={(event) => onChange({ boxColor: event.target.value })}
               />
               <span>{t.text.boxColor}</span>
             </label>
             <SliderField
               id="text-box-opacity"
               label={t.text.opacity}
-              value={Math.round(settings.textBoxOpacity * 100)}
+              value={Math.round(layer.boxOpacity * 100)}
               min={0}
               max={100}
               step={5}
               unit="%"
-              onChange={(percent) => onChange({ textBoxOpacity: percent / 100 })}
+              onChange={(percent) => onChange({ boxOpacity: percent / 100 })}
             />
           </div>
         )}
 
         <p className="note">{t.text.note}</p>
       </fieldset>
-    </div>
+    </>
   );
 }

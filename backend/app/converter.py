@@ -6,11 +6,13 @@ compression); WebP and MP4 use libwebp and libx264.
 
 import math
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 from app.config import settings
+from app.effects import Effect
 from app.overlay import TextOverlay
 
 MIN_FPS, MAX_FPS = 1, 30
@@ -152,19 +154,21 @@ class TrimRange:
             )
 
 
-def build_filtergraph(options: GifOptions, text_filter: str | None = None) -> str:
+def build_filtergraph(options: GifOptions, extra_filters: str | None = None) -> str:
     """Filtergraph that turns the input into frames for ``options.format``.
+
+    ``extra_filters`` are effect and drawtext filters joined with commas.
 
     For GIF, the video is split in two: one branch builds an optimal palette
     of up to ``options.colors`` colours for the whole clip, the other is
     mapped onto it. This gives far better colours than FFmpeg's default GIF
     palette.
 
-    ``text_filter`` (a drawtext filter) runs after scaling, so font sizes and
-    offsets are in output pixels, and before palettegen, so the palette has
-    the text colours.
+    ``extra_filters`` run after scaling, so font sizes, offsets and blur radii
+    are in output pixels, and before palettegen, so the palette has their
+    colours.
     """
-    text = f",{text_filter}" if text_filter else ""
+    text = f",{extra_filters}" if extra_filters else ""
     if options.format is OutputFormat.MP4:
         # H.264 in yuv420p needs even dimensions.
         width = options.width - options.width % 2
@@ -218,7 +222,7 @@ def build_command(
     dst: Path,
     options: GifOptions,
     trim: TrimRange | None = None,
-    text_filter: str | None = None,
+    extra_filters: str | None = None,
 ) -> list[str]:
     command = [settings.ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y"]
     # -ss before -i seeks in the input; since the video is re-encoded, the cut is
@@ -231,7 +235,7 @@ def build_command(
     return [
         *command,
         "-filter_complex",
-        build_filtergraph(options, text_filter),
+        build_filtergraph(options, extra_filters),
         *encoder_args(options),
         str(dst),
     ]
@@ -254,17 +258,27 @@ def convert_video(
     dst: Path,
     options: GifOptions | None = None,
     trim: TrimRange | None = None,
-    overlay: TextOverlay | None = None,
+    overlays: Sequence[TextOverlay] = (),
+    effects: Sequence[Effect] = (),
 ) -> Path:
+    """Render ``src`` to ``dst``.
+
+    ``effects`` apply in order to the video; ``overlays`` are then drawn in
+    order, the last on top, so effects never blur or tint the text.
+    """
     options = options or GifOptions()
-    text_filter = None
-    if overlay is not None:
-        text_file = overlay.write_text_file(dst.with_name(f"{dst.stem}-text.txt"))
-        text_filter = overlay.to_filter(text_file, settings.font_file)
+    effect_filters = [f for f in (effect.to_filter() for effect in effects) if f]
+    text_filters = [
+        overlay.to_filter(
+            overlay.write_text_file(dst.with_name(f"{dst.stem}-text-{i}.txt")), settings.font_file
+        )
+        for i, overlay in enumerate(overlays)
+    ]
+    extra_filters = ",".join(effect_filters + text_filters) or None
     # With lossy GIF compression, FFmpeg writes an intermediate GIF for gifsicle.
     use_gifsicle = options.format is OutputFormat.GIF and options.lossy > 0
     ffmpeg_dst = dst.with_name(f"{dst.stem}-ffmpeg.gif") if use_gifsicle else dst
-    _run(build_command(src, ffmpeg_dst, options, trim, text_filter), ffmpeg_dst, "ffmpeg")
+    _run(build_command(src, ffmpeg_dst, options, trim, extra_filters), ffmpeg_dst, "ffmpeg")
     if use_gifsicle:
         try:
             _run(build_gifsicle_command(ffmpeg_dst, dst, options.lossy), dst, "gifsicle")

@@ -1,5 +1,6 @@
 import { type CSSProperties, forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { hasText, type EditorSettings, type TextPosition } from "../lib/settings";
+import { previewFilter } from "../lib/effects";
+import { activeTexts, type EditorSettings, type TextLayer, type TextPosition } from "../lib/settings";
 
 // Must match EDGE_MARGIN and BOX_PADDING in backend/app/overlay.py.
 const EDGE_MARGIN = 10;
@@ -77,9 +78,29 @@ function withOpacity(hex: string, opacity: number): string {
   return `${hex}${alpha}`;
 }
 
+function TextPreview({ layer, scale }: { layer: TextLayer; scale: number }) {
+  return (
+    <div
+      className="text-preview"
+      style={{
+        ...placement(layer.position, EDGE_MARGIN * scale),
+        fontSize: layer.size * scale,
+        color: layer.color,
+        WebkitTextStroke: layer.outline > 0 ? `${layer.outline * 2 * scale}px ${layer.outlineColor}` : undefined,
+        background: layer.box ? withOpacity(layer.boxColor, layer.boxOpacity) : undefined,
+        // drawtext grows the box outwards from the text, so the text keeps its place.
+        padding: layer.box ? BOX_PADDING * scale : 0,
+        margin: layer.box ? -BOX_PADDING * scale : 0,
+      }}
+    >
+      {layer.text}
+    </div>
+  );
+}
+
 /**
  * The source video with the trim range looped and an approximate preview of
- * the text overlay drawn on top. The final GIF is rendered by FFmpeg, so the
+ * the text overlays drawn on top. The final GIF is rendered by FFmpeg, so the
  * text may differ slightly. Playback is driven by the editor's own controls.
  */
 export const VideoPreview = forwardRef<VideoPreviewHandle, Props>(function VideoPreview(
@@ -170,10 +191,9 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, Props>(function Video
   }, [playing, start, end, report]);
 
   const gifTime = time - start;
-  const textVisible =
-    hasText(settings) &&
-    (settings.textStart === null || gifTime >= settings.textStart) &&
-    (settings.textEnd === null || gifTime < settings.textEnd);
+  const visibleTexts = activeTexts(settings).filter(
+    (layer) => (layer.start === null || gifTime >= layer.start) && (layer.end === null || gifTime < layer.end),
+  );
 
   const scale = rect ? rect.width / gifWidth : 1;
 
@@ -182,6 +202,7 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, Props>(function Video
       <video
         ref={video}
         src={src}
+        style={{ filter: previewFilter(settings.effects, gifTime, scale) }}
         playsInline
         muted
         preload="auto"
@@ -206,32 +227,15 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, Props>(function Video
         }}
         onError={onUnplayable}
       />
-      {rect && textVisible && (
+      {rect && visibleTexts.length > 0 && (
         <div
           className="text-layer"
           style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
           aria-hidden
         >
-          <div
-            className="text-preview"
-            style={{
-              ...placement(settings.textPosition, EDGE_MARGIN * scale),
-              fontSize: settings.textSize * scale,
-              color: settings.textColor,
-              WebkitTextStroke:
-                settings.textOutline > 0
-                  ? `${settings.textOutline * 2 * scale}px ${settings.textOutlineColor}`
-                  : undefined,
-              background: settings.textBox
-                ? withOpacity(settings.textBoxColor, settings.textBoxOpacity)
-                : undefined,
-              // drawtext grows the box outwards from the text, so the text keeps its place.
-              padding: settings.textBox ? BOX_PADDING * scale : 0,
-              margin: settings.textBox ? -BOX_PADDING * scale : 0,
-            }}
-          >
-            {settings.text}
-          </div>
+          {visibleTexts.map((layer) => (
+            <TextPreview key={layer.id} layer={layer} scale={scale} />
+          ))}
         </div>
       )}
     </div>

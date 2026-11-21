@@ -33,6 +33,8 @@ export const LIMITS = {
   textSize: [8, 200],
   textOutline: [0, 10],
   textLength: 500,
+  textLayers: 10,
+  effects: 10,
   minTargetKb: 10,
 } as const;
 
@@ -46,24 +48,45 @@ export interface Overrides {
   lossy: number | null;
 }
 
+/** One caption. Layers are drawn in list order, the last on top. */
+export interface TextLayer {
+  id: string;
+  text: string;
+  size: number;
+  color: string;
+  position: TextPosition;
+  outline: number;
+  outlineColor: string;
+  box: boolean;
+  boxColor: string;
+  /** Box opacity from 0 to 1. */
+  boxOpacity: number;
+  /** Seconds from the start of the GIF; null means the whole GIF. */
+  start: number | null;
+  end: number | null;
+}
+
+export const EFFECT_TYPES = ["grayscale", "sepia", "blur", "brightness", "contrast", "saturation"] as const;
+export type EffectType = (typeof EFFECT_TYPES)[number];
+
+/** A video effect. Effects apply in list order, under the text. */
+export interface EffectLayer {
+  id: string;
+  type: EffectType;
+  /** Strength from 0 to 100. */
+  amount: number;
+  /** Seconds from the start of the GIF; null means the whole GIF. */
+  start: number | null;
+  end: number | null;
+}
+
 export interface EditorSettings {
   /** Trim range in seconds; `end` null means the end of the video. */
   start: number;
   end: number | null;
 
-  text: string;
-  textSize: number;
-  textColor: string;
-  textPosition: TextPosition;
-  textOutline: number;
-  textOutlineColor: string;
-  textBox: boolean;
-  textBoxColor: string;
-  /** Box opacity from 0 to 1. */
-  textBoxOpacity: number;
-  /** Seconds from the start of the GIF; null means the whole GIF. */
-  textStart: number | null;
-  textEnd: number | null;
+  texts: TextLayer[];
+  effects: EffectLayer[];
 
   format: OutputFormat;
   mode: CompressionMode;
@@ -72,20 +95,38 @@ export interface EditorSettings {
   targetSizeKb: number | null;
 }
 
+let nextLayerId = 1;
+
+/** An empty caption with the default style. */
+export function newTextLayer(patch: Partial<TextLayer> = {}): TextLayer {
+  return {
+    id: `text-${nextLayerId++}`,
+    text: "",
+    size: 32,
+    color: "#ffffff",
+    position: "bottom",
+    outline: 2,
+    outlineColor: "#000000",
+    box: false,
+    boxColor: "#000000",
+    boxOpacity: 0.5,
+    start: null,
+    end: null,
+    ...patch,
+  };
+}
+
+let nextEffectId = 1;
+
+export function newEffect(patch: Partial<EffectLayer> = {}): EffectLayer {
+  return { id: `effect-${nextEffectId++}`, type: "grayscale", amount: 100, start: null, end: null, ...patch };
+}
+
 export const DEFAULT_SETTINGS: EditorSettings = {
   start: 0,
   end: null,
-  text: "",
-  textSize: 32,
-  textColor: "#ffffff",
-  textPosition: "bottom",
-  textOutline: 2,
-  textOutlineColor: "#000000",
-  textBox: false,
-  textBoxColor: "#000000",
-  textBoxOpacity: 0.5,
-  textStart: null,
-  textEnd: null,
+  texts: [newTextLayer()],
+  effects: [],
   format: "gif",
   mode: "preset",
   preset: "medium",
@@ -96,8 +137,13 @@ export const DEFAULT_SETTINGS: EditorSettings = {
 // Differences below this are float noise from the video element, not a real trim.
 const EPSILON = 0.005;
 
-export function hasText(settings: EditorSettings): boolean {
-  return settings.text.trim().length > 0;
+export function hasText(layer: TextLayer): boolean {
+  return layer.text.trim().length > 0;
+}
+
+/** Layers that will be drawn: the ones with text. */
+export function activeTexts(settings: EditorSettings): TextLayer[] {
+  return settings.texts.filter(hasText);
 }
 
 /** Length of the GIF in seconds, or null if the video duration is unknown. */
@@ -126,19 +172,34 @@ export function validate(
     else if (duration !== null && end > duration + EPSILON) errors.push(messages.endAfterVideo);
   }
 
-  if (hasText(settings)) {
-    if (settings.text.length > LIMITS.textLength) errors.push(messages.textTooLong(LIMITS.textLength));
-    if (!inRange(settings.textSize, LIMITS.textSize))
-      errors.push(messages.fontSize(...LIMITS.textSize));
-    if (!inRange(settings.textOutline, LIMITS.textOutline))
-      errors.push(messages.outline(...LIMITS.textOutline));
-    const { textStart, textEnd } = settings;
-    const length = clipLength(settings, duration);
-    if (textStart !== null && length !== null && textStart >= length)
-      errors.push(messages.textAfterGif);
-    if (textStart !== null && textEnd !== null && textEnd <= textStart)
-      errors.push(messages.textHiddenBeforeShown);
-  }
+  const length = clipLength(settings, duration);
+  const multiple = activeTexts(settings).length > 1;
+  settings.texts.forEach((layer, index) => {
+    if (!hasText(layer)) return;
+    const problems: string[] = [];
+    if (layer.text.length > LIMITS.textLength) problems.push(messages.textTooLong(LIMITS.textLength));
+    if (!inRange(layer.size, LIMITS.textSize)) problems.push(messages.fontSize(...LIMITS.textSize));
+    if (!inRange(layer.outline, LIMITS.textOutline))
+      problems.push(messages.outline(...LIMITS.textOutline));
+    if (layer.start !== null && length !== null && layer.start >= length)
+      problems.push(messages.textAfterGif);
+    if (layer.start !== null && layer.end !== null && layer.end <= layer.start)
+      problems.push(messages.textHiddenBeforeShown);
+    // With several captions, say which one has the problem.
+    for (const problem of problems) errors.push(multiple ? messages.inLayer(index + 1, problem) : problem);
+  });
+
+  const multipleEffects = settings.effects.length > 1;
+  settings.effects.forEach((effect, index) => {
+    const problems: string[] = [];
+    if (!inRange(effect.amount, [0, 100])) problems.push(messages.effectAmount);
+    if (effect.start !== null && length !== null && effect.start >= length)
+      problems.push(messages.effectAfterGif);
+    if (effect.start !== null && effect.end !== null && effect.end <= effect.start)
+      problems.push(messages.effectEndsBeforeStart);
+    for (const problem of problems)
+      errors.push(multipleEffects ? messages.inEffect(index + 1, problem) : problem);
+  });
 
   const overrideKeys: (keyof Overrides)[] = ["fps", "width", "colors", "lossy"];
   for (const key of overrideKeys) {
@@ -180,19 +241,32 @@ export function toFormFields(
   if (settings.mode === "target" && settings.targetSizeKb !== null)
     fields.target_size_kb = String(Math.round(settings.targetSizeKb));
 
-  if (hasText(settings)) {
-    fields.text = settings.text;
-    fields.text_size = String(settings.textSize);
-    fields.text_color = settings.textColor;
-    fields.text_position = settings.textPosition;
-    fields.text_outline = String(settings.textOutline);
-    fields.text_outline_color = settings.textOutlineColor;
-    if (settings.textBox) {
-      fields.text_box = "true";
-      fields.text_box_color = `${settings.textBoxColor}@${settings.textBoxOpacity.toFixed(2)}`;
-    }
-    if (settings.textStart !== null) fields.text_start = seconds(settings.textStart);
-    if (settings.textEnd !== null) fields.text_end = seconds(settings.textEnd);
+  const texts = activeTexts(settings);
+  if (texts.length > 0) {
+    fields.texts = JSON.stringify(
+      texts.map((layer) => ({
+        text: layer.text,
+        size: layer.size,
+        color: layer.color,
+        position: layer.position,
+        outline: layer.outline,
+        outline_color: layer.outlineColor,
+        ...(layer.box && { box: true, box_color: `${layer.boxColor}@${layer.boxOpacity.toFixed(2)}` }),
+        ...(layer.start !== null && { start: Math.round(layer.start * 1000) / 1000 }),
+        ...(layer.end !== null && { end: Math.round(layer.end * 1000) / 1000 }),
+      })),
+    );
+  }
+
+  if (settings.effects.length > 0) {
+    fields.effects = JSON.stringify(
+      settings.effects.map((effect) => ({
+        type: effect.type,
+        amount: Math.round(effect.amount),
+        ...(effect.start !== null && { start: Math.round(effect.start * 1000) / 1000 }),
+        ...(effect.end !== null && { end: Math.round(effect.end * 1000) / 1000 }),
+      })),
+    );
   }
 
   return fields;

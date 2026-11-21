@@ -33,6 +33,7 @@ from app.converter import (
     TrimRange,
     convert_video,
 )
+from app.effects import Effect, parse_effects
 from app.estimate import (
     Clip,
     TargetUnreachableError,
@@ -49,6 +50,7 @@ from app.overlay import (
     MIN_FONT_SIZE,
     TextOverlay,
     TextPosition,
+    parse_text_layers,
 )
 from app.probe import ProbeError, probe_duration
 from app.workdirs import new_workdir, remove_stale_workdirs
@@ -114,7 +116,8 @@ class ConversionParams:
 
     options: GifOptions
     trim: TrimRange
-    overlay: TextOverlay | None
+    overlays: tuple[TextOverlay, ...]
+    effects: tuple[Effect, ...]
     target_bytes: int | None
 
 
@@ -211,15 +214,36 @@ def conversion_params(
         float | None,
         Form(gt=0, description="When the text disappears, in seconds from the start of the GIF"),
     ] = None,
+    texts: Annotated[
+        str | None,
+        Form(
+            description=(
+                "Several captions as a JSON array of objects with the keys text, size, color, "
+                "position, x, y, outline, outline_color, box, box_color, start and end (same "
+                "meaning as the text_* fields). Drawn after the text field, the last on top"
+            ),
+        ),
+    ] = None,
+    effects: Annotated[
+        str | None,
+        Form(
+            description=(
+                "Video effects as a JSON array of objects with type (grayscale, sepia, blur, "
+                "brightness, contrast, saturation), amount (0-100, default 100) and optional "
+                "start and end in seconds from the start of the output. Applied in order, "
+                "under the text"
+            ),
+        ),
+    ] = None,
 ) -> ConversionParams:
     try:
         options = resolve_options(
             preset, fps=fps, width=width, colors=colors, lossy=lossy, format=format
         )
         trim = TrimRange(start=start or 0.0, end=end, duration=duration)
-        overlay = None
+        overlays: list[TextOverlay] = []
         if text and text.strip():
-            overlay = TextOverlay(
+            single = TextOverlay(
                 text=text,
                 font_size=text_size,
                 color=text_color,
@@ -233,12 +257,17 @@ def conversion_params(
                 start=text_start,
                 end=text_end,
             )
+            overlays.append(single)
+        if texts:
+            overlays += parse_text_layers(texts)
+        effect_list = parse_effects(effects) if effects else []
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ConversionParams(
         options=options,
         trim=trim,
-        overlay=overlay,
+        overlays=tuple(overlays),
+        effects=tuple(effect_list),
         target_bytes=None if target_size_kb is None else target_size_kb * 1024,
     )
 
@@ -277,7 +306,7 @@ def convert(file: Video, params: Params) -> FileResponse:
             if params.target_bytes is not None:
                 options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
             else:
-                convert_video(src, dst, options, params.trim, params.overlay)
+                convert_video(src, dst, options, params.trim, params.overlays, params.effects)
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
@@ -339,7 +368,7 @@ def _clip(src: Path, params: ConversionParams) -> Clip:
         params.trim.check_within(video_duration)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    clip = Clip.from_trim(src, params.trim, video_duration, params.overlay)
+    clip = Clip.from_trim(src, params.trim, video_duration, params.overlays, params.effects)
     limit = settings.max_clip_seconds
     if limit > 0 and clip.length > limit + CLIP_TOLERANCE_S:
         raise HTTPException(
