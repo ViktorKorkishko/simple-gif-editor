@@ -1,7 +1,9 @@
 """HTTP API."""
 
+import logging
 import shutil
-import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -11,6 +13,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+from starlette.responses import Response
+from starlette.types import Scope
 
 from app.compression import PRESETS, CompressionPreset, resolve_options
 from app.config import settings
@@ -35,6 +39,7 @@ from app.estimate import (
     estimate_size,
     fit_to_target,
 )
+from app.limits import FORM_OVERHEAD_BYTES, BodySizeLimitMiddleware, JobSlots
 from app.overlay import (
     MAX_FONT_SIZE,
     MAX_OFFSET,
@@ -45,11 +50,31 @@ from app.overlay import (
     TextPosition,
 )
 from app.probe import ProbeError, probe_duration
+from app.workdirs import new_workdir, remove_stale_workdirs
 
-app = FastAPI(title="Simple GIF Editor", version="0.1.0")
+logger = logging.getLogger("uvicorn.error")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    removed = remove_stale_workdirs()
+    if removed:
+        logger.info("Removed %d stale work directories", removed)
+    yield
+
+
+app = FastAPI(title="Simple GIF Editor", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    BodySizeLimitMiddleware,
+    max_bytes=lambda: settings.max_upload_bytes + FORM_OVERHEAD_BYTES,
+)
+
+job_slots = JobSlots(settings.max_concurrent_jobs)
 
 CHUNK = 1024 * 1024
 MIN_TARGET_KB = 10
+# Container durations are not exact, so a clip a few ms over the limit passes.
+CLIP_TOLERANCE_S = 0.05
 
 
 class GifSettings(BaseModel):
@@ -227,20 +252,19 @@ def convert(file: Video, params: Params) -> FileResponse:
     The settings actually used are returned in the ``X-Gif-*`` headers, which
     matters in target size mode.
     """
-    workdir = Path(tempfile.mkdtemp(prefix="gif-"))
+    workdir = new_workdir()
     cleanup = BackgroundTask(shutil.rmtree, workdir, ignore_errors=True)
     dst = workdir / "output.gif"
     try:
         src = workdir / "input"
         _save_upload(file, src)
         options = params.options
-        if params.target_bytes is not None:
+        with job_slots.slot(settings.job_wait_s):
             clip = _clip(src, params)
-            options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
-        else:
-            if not params.trim.is_full:
-                _clip(src, params)
-            convert_to_gif(src, dst, options, params.trim, params.overlay)
+            if params.target_bytes is not None:
+                options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
+            else:
+                convert_to_gif(src, dst, options, params.trim, params.overlay)
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
@@ -268,15 +292,16 @@ def estimate(file: Video, params: Params) -> SizeEstimateResponse:
     With ``target_size_kb``, returns the settings that would be chosen to fit it.
     Long clips are sampled, so the size is approximate unless ``exact`` is true.
     """
-    workdir = Path(tempfile.mkdtemp(prefix="gif-"))
+    workdir = new_workdir()
     try:
         src = workdir / "input"
         _save_upload(file, src)
-        clip = _clip(src, params)
-        if params.target_bytes is not None:
-            result = fit_to_target(clip, params.options, params.target_bytes, workdir)
-        else:
-            result = estimate_size(clip, params.options, workdir)
+        with job_slots.slot(settings.job_wait_s):
+            clip = _clip(src, params)
+            if params.target_bytes is not None:
+                result = fit_to_target(clip, params.options, params.target_bytes, workdir)
+            else:
+                result = estimate_size(clip, params.options, workdir)
     except TargetUnreachableError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ConversionError as exc:
@@ -292,7 +317,7 @@ def estimate(file: Video, params: Params) -> SizeEstimateResponse:
 
 
 def _clip(src: Path, params: ConversionParams) -> Clip:
-    """Check the trim range against the video and describe the clip."""
+    """Check the trim range and clip length against the video and describe the clip."""
     try:
         video_duration = probe_duration(src)
     except ProbeError as exc:
@@ -301,7 +326,17 @@ def _clip(src: Path, params: ConversionParams) -> Clip:
         params.trim.check_within(video_duration)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return Clip.from_trim(src, params.trim, video_duration, params.overlay)
+    clip = Clip.from_trim(src, params.trim, video_duration, params.overlay)
+    limit = settings.max_clip_seconds
+    if limit > 0 and clip.length > limit + CLIP_TOLERANCE_S:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"The GIF would be {clip.length:.1f} s long, the limit is {limit:g} s. "
+                "Choose a shorter part of the video"
+            ),
+        )
+    return clip
 
 
 def _settings_headers(options: GifOptions) -> dict[str, str]:
@@ -328,13 +363,33 @@ def _save_upload(upload: UploadFile, dst: Path) -> None:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
 
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+class FrontendFiles(StaticFiles):
+    """Static files with cache headers that suit a Vite build.
+
+    Files under ``assets/`` have content hashes in their names and never
+    change, so browsers may keep them for a year. Everything else, notably
+    ``index.html``, must be revalidated so a new deploy shows up at once.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            response.headers["Cache-Control"] = (
+                IMMUTABLE if path.startswith("assets/") else "no-cache"
+            )
+        return response
+
+
 def mount_frontend(target: FastAPI, directory: Path | None) -> None:
     """Serve the built web UI from ``directory`` at ``/``, after the API routes."""
     if directory is None:
         return
     if not directory.is_dir():
         raise RuntimeError(f"FRONTEND_DIR {directory} is not a directory")
-    target.mount("/", StaticFiles(directory=directory, html=True), name="frontend")
+    target.mount("/", FrontendFiles(directory=directory, html=True), name="frontend")
 
 
 mount_frontend(app, settings.frontend_dir)

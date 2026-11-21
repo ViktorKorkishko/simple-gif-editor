@@ -1,0 +1,49 @@
+# Production: the app behind Caddy, which obtains and renews HTTPS
+# certificates automatically. See docs/deployment.md.
+#
+#   cp docker/.env.example docker/.env   # then set DOMAIN
+#   docker compose -f docker/docker-compose.prod.yml up -d --build
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/app.Dockerfile
+    # Set IMAGE to a published image (e.g. from GHCR) to pull instead of building.
+    image: ${IMAGE:-simple-gif-editor:latest}
+    environment:
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+      MAX_CLIP_SECONDS: ${MAX_CLIP_SECONDS:-60}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}
+      JOB_WAIT_S: ${JOB_WAIT_S:-30}
+      FFMPEG_TIMEOUT_S: ${FFMPEG_TIMEOUT_S:-120}
+      # Only Caddy can reach the app, so its X-Forwarded-For can be trusted.
+      FORWARDED_ALLOW_IPS: "*"
+    read_only: true
+    volumes:
+      # Uploads and intermediate files; kept off the read-only root filesystem.
+      - scratch:/tmp
+    init: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in docker/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  scratch:
+  caddy_data:
+  caddy_config:

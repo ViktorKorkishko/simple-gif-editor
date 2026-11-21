@@ -16,7 +16,8 @@ RUN apt-get update \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    FRONTEND_DIR=/app/static
+    FRONTEND_DIR=/app/static \
+    PORT=8000
 
 WORKDIR /app
 
@@ -29,4 +30,9 @@ RUN useradd --create-home appuser
 USER appuser
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import os, urllib.request as u; u.urlopen('http://127.0.0.1:' + os.environ['PORT'] + '/health', timeout=4)"
+
+# PORT is set by most hosting platforms; uvicorn trusts X-Forwarded-* headers
+# only from the addresses in FORWARDED_ALLOW_IPS (default 127.0.0.1).
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"$PORT\""]

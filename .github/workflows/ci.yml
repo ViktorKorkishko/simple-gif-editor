@@ -73,3 +73,22 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -f docker/app.Dockerfile -t simple-gif-editor .
+
+      - name: Smoke test
+        run: |
+          docker run -d --name app --read-only --tmpfs /tmp -p 8000:8000 simple-gif-editor
+          for _ in $(seq 30); do
+            curl -fsS http://localhost:8000/health && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8000/ -o index.html
+          grep -q 'id="root"' index.html
+          docker exec app ffmpeg -loglevel error -f lavfi \
+            -i testsrc=duration=1:size=160x120:rate=25 -pix_fmt yuv420p /tmp/clip.mp4
+          docker exec app cat /tmp/clip.mp4 > clip.mp4
+          curl -fsS -F file=@clip.mp4 -F text=Smoke http://localhost:8000/api/convert -o clip.gif
+          head -c 6 clip.gif | grep -q GIF89a
+
+      - name: Container logs
+        if: failure()
+        run: docker logs app
