@@ -12,7 +12,7 @@ from app.converter import (
     GifOptions,
     build_filtergraph,
     build_gifsicle_command,
-    convert_to_gif,
+    convert_video,
 )
 
 needs_gifsicle = pytest.mark.skipif(shutil.which("gifsicle") is None, reason="needs gifsicle")
@@ -64,8 +64,8 @@ def test_resolve_rejects_bad_override():
 
 @needs_gifsicle
 def test_lossy_conversion_is_smaller(long_video: Path, tmp_path: Path):
-    plain = convert_to_gif(long_video, tmp_path / "plain.gif", GifOptions(width=160))
-    lossy = convert_to_gif(long_video, tmp_path / "lossy.gif", GifOptions(width=160, lossy=100))
+    plain = convert_video(long_video, tmp_path / "plain.gif", GifOptions(width=160))
+    lossy = convert_video(long_video, tmp_path / "lossy.gif", GifOptions(width=160, lossy=100))
     assert lossy.read_bytes()[:6] == b"GIF89a"
     assert lossy.stat().st_size < plain.stat().st_size
     assert not (tmp_path / "lossy-ffmpeg.gif").exists()
@@ -75,4 +75,4 @@ def test_missing_gifsicle_is_reported(sample_video: Path, tmp_path: Path, monkey
     patched = replace(converter.settings, gifsicle_bin="definitely-not-gifsicle")
     monkeypatch.setattr(converter, "settings", patched)
     with pytest.raises(ConversionError, match="gifsicle is not installed"):
-        convert_to_gif(sample_video, tmp_path / "out.gif", GifOptions(width=80, lossy=50))
+        convert_video(sample_video, tmp_path / "out.gif", GifOptions(width=80, lossy=50))

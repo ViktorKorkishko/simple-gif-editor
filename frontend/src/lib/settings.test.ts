@@ -31,6 +31,15 @@ describe("toFormFields", () => {
     });
   });
 
+  it("sends the format unless it is GIF, and colors only for GIF", () => {
+    const overrides = { fps: null, width: null, colors: 64, lossy: 30 };
+    expect(toFormFields(make({ overrides }), 10)).toMatchObject({ colors: "64" });
+    expect(toFormFields(make({ overrides, format: "gif" }), 10)).not.toHaveProperty("format");
+    const webp = toFormFields(make({ overrides, format: "webp" }), 10);
+    expect(webp).toMatchObject({ format: "webp", lossy: "30" });
+    expect(webp).not.toHaveProperty("colors");
+  });
+
   it("sends text fields only when there is text", () => {
     expect(toFormFields(make({ text: "   " }), 10)).not.toHaveProperty("text");
     const fields = toFormFields(

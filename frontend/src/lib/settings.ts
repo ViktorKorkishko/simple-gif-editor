@@ -18,6 +18,12 @@ export type TextPosition = (typeof POSITIONS)[number];
 
 export type CompressionMode = "preset" | "target";
 
+export const OUTPUT_FORMATS = ["gif", "webp", "mp4"] as const;
+export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
+
+/** File extension and display name of each format. */
+export const FORMAT_LABELS: Record<OutputFormat, string> = { gif: "GIF", webp: "WebP", mp4: "MP4" };
+
 /** Limits enforced by the backend; mirrored here to catch mistakes before a request. */
 export const LIMITS = {
   fps: [1, 30],
@@ -59,6 +65,7 @@ export interface EditorSettings {
   textStart: number | null;
   textEnd: number | null;
 
+  format: OutputFormat;
   mode: CompressionMode;
   preset: Preset;
   overrides: Overrides;
@@ -79,6 +86,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   textBoxOpacity: 0.5,
   textStart: null,
   textEnd: null,
+  format: "gif",
   mode: "preset",
   preset: "medium",
   overrides: { fps: null, width: null, colors: null, lossy: null },
@@ -159,13 +167,15 @@ export function toFormFields(
   duration: number | null,
 ): Record<string, string> {
   const fields: Record<string, string> = { preset: settings.preset };
+  if (settings.format !== "gif") fields.format = settings.format;
 
   if (settings.start > EPSILON) fields.start = seconds(settings.start);
   if (settings.end !== null && (duration === null || settings.end < duration - EPSILON))
     fields.end = seconds(settings.end);
 
   for (const [key, value] of Object.entries(settings.overrides)) {
-    if (value !== null) fields[key] = String(value);
+    // The palette size only exists for GIF.
+    if (value !== null && (key !== "colors" || settings.format === "gif")) fields[key] = String(value);
   }
   if (settings.mode === "target" && settings.targetSizeKb !== null)
     fields.target_size_kb = String(Math.round(settings.targetSizeKb));

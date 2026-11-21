@@ -201,7 +201,7 @@ def test_convert_to_target_size(client, sampled_video: Path):
 def test_convert_to_unreachable_target(client, sampled_video: Path):
     resp = post_form(client, "/api/convert", sampled_video, target_size_kb=10)
     assert resp.status_code == 422
-    assert "cannot fit the GIF into 10 KB" in resp.json()["detail"]
+    assert "cannot fit the file into 10 KB" in resp.json()["detail"]
 
 
 def test_estimate_matches_conversion(client, long_video: Path):
@@ -270,3 +270,35 @@ def test_estimate_rejects_clip_over_length_limit(client, long_video: Path, monke
 def test_zero_disables_length_limit(client, long_video: Path, monkeypatch):
     monkeypatch.setattr(main, "settings", replace(settings, max_clip_seconds=0))
     assert post_trim(client, long_video).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "output_format, media_type, magic",
+    [("webp", "image/webp", b"WEBP"), ("mp4", "video/mp4", b"ftyp")],
+)
+def test_convert_to_other_formats(client, sample_video: Path, output_format, media_type, magic):
+    resp = post_form(client, "/api/convert", sample_video, format=output_format, preset="low")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"] == media_type
+    assert f'filename="clip.{output_format}"' in resp.headers["content-disposition"]
+    assert resp.content[8:12] == magic or resp.content[4:8] == magic
+
+
+def test_convert_rejects_unknown_format(client, sample_video: Path):
+    assert post_form(client, "/api/convert", sample_video, format="avi").status_code == 422
+
+
+def test_estimate_matches_webp_conversion(client, long_video: Path):
+    fields = {"format": "webp", "preset": "medium", "start": 1, "end": 3}
+    body = post_form(client, "/api/estimate", long_video, **fields).json()
+    assert body["exact"] is True
+    webp = post_form(client, "/api/convert", long_video, **fields)
+    assert body["estimated_bytes"] == len(webp.content)
+
+
+def test_mp4_to_target_size(client, sampled_video: Path):
+    resp = post_form(
+        client, "/api/convert", sampled_video, format="mp4", width=160, target_size_kb=20
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(resp.content) <= 20 * 1024
