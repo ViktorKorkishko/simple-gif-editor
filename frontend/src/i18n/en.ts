@@ -1,6 +1,6 @@
 /** English UI text. Every other language must provide the same keys. */
 
-import type { TextPosition, Preset } from "../lib/settings";
+import type { OutputFormat, TextPosition, Preset } from "../lib/settings";
 
 const plural = new Intl.PluralRules("en");
 
@@ -100,6 +100,12 @@ export const en = {
     title: "Export",
     close: "Close",
     closeMenu: "Close export menu",
+    format: "Format",
+    formats: {
+      gif: "Works everywhere",
+      webp: "Smaller file",
+      mp4: "Best quality",
+    } satisfies Record<OutputFormat, string>,
     modeGroup: "How to pick the quality",
     modePreset: "Preset",
     modeTarget: "Target size",
@@ -109,14 +115,16 @@ export const en = {
       medium: "Medium",
       low: "Low",
     } satisfies Record<Preset, string>,
-    maxSize: "Maximum GIF size",
+    maxSize: "Maximum file size",
     targetNote:
-      "The selected quality is the starting point. Colors, frame rate and then width are lowered until the GIF fits.",
+      "The selected quality is the starting point. Quality, frame rate and then width are lowered until the file fits.",
     width: "Width, px",
     fps: "Frames per second",
     more: "More settings",
     colors: "Colors",
     lossy: "Lossy compression",
+    compression: "Compression",
+    compressionNote: "Higher values give a smaller file of lower quality.",
     leaveEmpty: "Leave a field empty to use the preset's value.",
     reset: "Reset to preset",
     frameSize: "Frame size",
@@ -130,13 +138,13 @@ export const en = {
     uploading: (percent: number) => `Uploading ${percent}%`,
     converting: "Converting…",
     cancel: "Cancel",
-    submit: "Export GIF",
+    submit: (format: string) => `Export ${format}`,
   },
 
   result: {
-    title: "Your GIF",
+    title: (format: string) => `Your ${format}`,
     back: "Back to settings",
-    imageAlt: "Converted GIF",
+    imageAlt: "Converted file",
     madeIn: (seconds: string) => `made in ${seconds} s`,
     download: "Download",
   },
@@ -145,6 +153,7 @@ export const en = {
     fps: (fps: number) => `${fps} fps`,
     colors: (colors: number) => `${colors} ${plural.select(colors) === "one" ? "color" : "colors"}`,
     lossy: (level: number) => `lossy ${level}`,
+    compression: (level: number) => `compression ${level}`,
   },
 
   errors: {
