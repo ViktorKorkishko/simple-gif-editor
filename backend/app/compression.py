@@ -3,7 +3,7 @@
 from dataclasses import replace
 from enum import StrEnum
 
-from app.converter import Dither, GifOptions
+from app.converter import Dither, GifOptions, OutputFormat
 
 
 class CompressionPreset(StrEnum):
@@ -33,9 +33,10 @@ def resolve_options(
     width: int | None = None,
     colors: int | None = None,
     lossy: int | None = None,
+    format: OutputFormat = OutputFormat.GIF,
 ) -> GifOptions:
     """Start from a preset (or the plain defaults) and apply explicit overrides."""
-    base = PRESETS[preset] if preset is not None else GifOptions()
+    base = replace(PRESETS[preset] if preset is not None else GifOptions(), format=format)
     overrides = {
         name: value
         for name, value in (("fps", fps), ("width", width), ("colors", colors), ("lossy", lossy))

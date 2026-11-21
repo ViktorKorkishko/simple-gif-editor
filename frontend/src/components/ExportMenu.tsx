@@ -7,7 +7,14 @@ import { useObjectUrl } from "../hooks/useObjectUrl";
 import { useI18n } from "../i18n/I18nProvider";
 import { describeError, type ConvertResult, type GifSettings, type PresetTable } from "../lib/api";
 import { formatBytes } from "../lib/format";
-import { LIMITS, type EditorSettings, type Overrides, type Preset } from "../lib/settings";
+import {
+  FORMAT_LABELS,
+  LIMITS,
+  OUTPUT_FORMATS,
+  type EditorSettings,
+  type Overrides,
+  type Preset,
+} from "../lib/settings";
 
 export type ConvertState =
   | { status: "idle" }
@@ -51,7 +58,14 @@ function ResultView({
 
   return (
     <div className="export-result">
-      <div className="result-image">{url && <img src={url} alt={t.result.imageAlt} />}</div>
+      <div className="result-image">
+        {url &&
+          (result.format === "mp4" ? (
+            <video src={url} aria-label={t.result.imageAlt} autoPlay loop muted playsInline controls />
+          ) : (
+            <img src={url} alt={t.result.imageAlt} />
+          ))}
+      </div>
       <div className="summary-box">
         <div className="summary-row">
           <span className="muted">{result.filename}</span>
@@ -60,7 +74,7 @@ function ResultView({
         <p className="note">
           {result.settings && (
             <>
-              <SettingsSummary settings={result.settings} />
+              <SettingsSummary settings={result.settings} format={result.format} />
               {" · "}
             </>
           )}
@@ -102,6 +116,8 @@ export function ExportMenu({
   const { t } = useI18n();
   const panel = useRef<HTMLElement>(null);
   const busy = convertState.status === "uploading" || convertState.status === "converting";
+  const isGif = settings.format === "gif";
+  const formatLabel = FORMAT_LABELS[settings.format];
   const base = presets?.[settings.preset];
   const overridden = Object.values(settings.overrides).some((value) => value !== null);
 
@@ -145,7 +161,9 @@ export function ExportMenu({
       tabIndex={-1}
     >
       <div className="export-header">
-        <h2 id="export-title">{result ? t.result.title : t.exporter.title}</h2>
+        <h2 id="export-title">
+          {result ? t.result.title(FORMAT_LABELS[result.result.format]) : t.exporter.title}
+        </h2>
         <button
           type="button"
           className="icon-button ghost"
@@ -162,6 +180,27 @@ export function ExportMenu({
       ) : (
         <>
           <fieldset className="export-settings" disabled={busy}>
+            <div className="field">
+              <span className="field-label" id="format-label">
+                {t.exporter.format}
+              </span>
+              <div className="option-grid" role="radiogroup" aria-labelledby="format-label">
+                {OUTPUT_FORMATS.map((format) => (
+                  <button
+                    key={format}
+                    type="button"
+                    role="radio"
+                    aria-checked={settings.format === format}
+                    className="option-card format-card"
+                    onClick={() => onChange({ format })}
+                  >
+                    <span className="option-title mono">{FORMAT_LABELS[format]}</span>
+                    <span className="option-meta">{t.exporter.formats[format]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="segmented" role="radiogroup" aria-label={t.exporter.modeGroup}>
               {(["preset", "target"] as const).map((mode) => (
                 <button
@@ -263,17 +302,19 @@ export function ExportMenu({
             <details className="more" open={settings.overrides.colors !== null || settings.overrides.lossy !== null || undefined}>
               <summary>{t.exporter.more}</summary>
               <div className="pair">
+                {isGif && (
+                  <NumberField
+                    label={t.exporter.colors}
+                    min={LIMITS.colors[0]}
+                    max={LIMITS.colors[1]}
+                    step={1}
+                    placeholder={base ? String(base.colors) : undefined}
+                    value={settings.overrides.colors}
+                    onChange={(value) => setOverride("colors", value)}
+                  />
+                )}
                 <NumberField
-                  label={t.exporter.colors}
-                  min={LIMITS.colors[0]}
-                  max={LIMITS.colors[1]}
-                  step={1}
-                  placeholder={base ? String(base.colors) : undefined}
-                  value={settings.overrides.colors}
-                  onChange={(value) => setOverride("colors", value)}
-                />
-                <NumberField
-                  label={t.exporter.lossy}
+                  label={isGif ? t.exporter.lossy : t.exporter.compression}
                   min={LIMITS.lossy[0]}
                   max={LIMITS.lossy[1]}
                   step={1}
@@ -282,7 +323,9 @@ export function ExportMenu({
                   onChange={(value) => setOverride("lossy", value)}
                 />
               </div>
-              <p className="note">{t.exporter.leaveEmpty}</p>
+              <p className="note">
+                {isGif ? t.exporter.leaveEmpty : `${t.exporter.compressionNote} ${t.exporter.leaveEmpty}`}
+              </p>
             </details>
             {overridden && (
               <button
@@ -364,7 +407,7 @@ export function ExportMenu({
             ) : (
               <button type="button" className="button primary large" disabled={!canConvert} onClick={onConvert}>
                 <DownloadIcon size={18} />
-                <span>{t.exporter.submit}</span>
+                <span>{t.exporter.submit(formatLabel)}</span>
               </button>
             )}
           </div>

@@ -1,7 +1,7 @@
 /** Thin client for the backend API. */
 
 import { en, type Messages } from "../i18n/en";
-import type { Preset } from "./settings";
+import type { OutputFormat, Preset } from "./settings";
 
 export interface GifSettings {
   fps: number;
@@ -21,6 +21,7 @@ export interface SizeEstimate {
 export interface ConvertResult {
   blob: Blob;
   filename: string;
+  format: OutputFormat;
   settings: GifSettings | null;
 }
 
@@ -174,9 +175,11 @@ export async function convertVideo(
 ): Promise<ConvertResult> {
   const xhr = await postForm("/api/convert", buildForm(file, fields), "blob", options);
   const stem = file.name.replace(/\.[^.]+$/, "") || "video";
+  const format = (fields.format ?? "gif") as OutputFormat;
   return {
     blob: xhr.response as Blob,
-    filename: filenameFromDisposition(xhr.getResponseHeader("Content-Disposition"), `${stem}.gif`),
+    format,
+    filename: filenameFromDisposition(xhr.getResponseHeader("Content-Disposition"), `${stem}.${format}`),
     settings: settingsFromHeaders((name) => xhr.getResponseHeader(name)),
   };
 }

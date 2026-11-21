@@ -1,4 +1,8 @@
-"""Video → GIF conversion using FFmpeg's two-stage palette pipeline."""
+"""Video → GIF, WebP or MP4 conversion with FFmpeg.
+
+GIFs go through FFmpeg's two-stage palette pipeline (and gifsicle for lossy
+compression); WebP and MP4 use libwebp and libx264.
+"""
 
 import math
 import subprocess
@@ -19,6 +23,20 @@ DURATION_TOLERANCE_S = 0.05
 
 class ConversionError(RuntimeError):
     """FFmpeg could not convert the input (bad file, unsupported codec, timeout)."""
+
+
+class OutputFormat(StrEnum):
+    GIF = "gif"
+    WEBP = "webp"
+    MP4 = "mp4"
+
+    @property
+    def media_type(self) -> str:
+        return {"gif": "image/gif", "webp": "image/webp", "mp4": "video/mp4"}[self.value]
+
+    @property
+    def extension(self) -> str:
+        return self.value
 
 
 class Dither(StrEnum):
@@ -43,8 +61,10 @@ class Dither(StrEnum):
 class GifOptions:
     """Encoding settings.
 
-    ``colors`` limits the palette size; ``lossy`` is gifsicle's ``--lossy``
-    level (0 turns lossy compression and the gifsicle pass off).
+    ``lossy`` is the compression level for every format: for GIF it is
+    gifsicle's ``--lossy`` level (0 turns the gifsicle pass off), for WebP and
+    MP4 it maps to the encoder's quality (see ``webp_quality`` and ``mp4_crf``).
+    ``colors`` and ``dither`` only apply to GIF.
     """
 
     fps: int = 10
@@ -52,6 +72,7 @@ class GifOptions:
     colors: int = MAX_COLORS
     lossy: int = 0
     dither: Dither = Dither.SIERRA
+    format: OutputFormat = OutputFormat.GIF
 
     def __post_init__(self) -> None:
         if not MIN_FPS <= self.fps <= MAX_FPS:
@@ -62,6 +83,16 @@ class GifOptions:
             raise ValueError(f"colors must be between {MIN_COLORS} and {MAX_COLORS}")
         if not MIN_LOSSY <= self.lossy <= MAX_LOSSY:
             raise ValueError(f"lossy must be between {MIN_LOSSY} and {MAX_LOSSY}")
+
+    @property
+    def webp_quality(self) -> int:
+        """libwebp quality (0-100): 90 without compression, lower as ``lossy`` grows."""
+        return max(5, round(90 - self.lossy * 0.35))
+
+    @property
+    def mp4_crf(self) -> int:
+        """libx264 constant rate factor: 20 without compression, higher as ``lossy`` grows."""
+        return min(45, round(20 + self.lossy * 0.1))
 
 
 @dataclass(frozen=True)
@@ -122,25 +153,64 @@ class TrimRange:
 
 
 def build_filtergraph(options: GifOptions, text_filter: str | None = None) -> str:
-    """Single-pass palettegen/paletteuse graph.
+    """Filtergraph that turns the input into frames for ``options.format``.
 
-    The video is split in two: one branch builds an optimal palette of up to
-    ``options.colors`` colours for the whole clip, the other is mapped onto it.
-    This gives far better colours than FFmpeg's default GIF palette.
+    For GIF, the video is split in two: one branch builds an optimal palette
+    of up to ``options.colors`` colours for the whole clip, the other is
+    mapped onto it. This gives far better colours than FFmpeg's default GIF
+    palette.
 
     ``text_filter`` (a drawtext filter) runs after scaling, so font sizes and
     offsets are in output pixels, and before palettegen, so the palette has
     the text colours.
     """
-    text = f"{text_filter}," if text_filter else ""
+    text = f",{text_filter}" if text_filter else ""
+    if options.format is OutputFormat.MP4:
+        # H.264 in yuv420p needs even dimensions.
+        width = options.width - options.width % 2
+        return f"fps={options.fps},scale={width}:-2:flags=lanczos{text},format=yuv420p"
+    frames = f"fps={options.fps},scale={options.width}:-1:flags=lanczos{text}"
+    if options.format is OutputFormat.WEBP:
+        return frames
     return (
-        f"fps={options.fps},"
-        f"scale={options.width}:-1:flags=lanczos,"
-        f"{text}"
+        f"{frames},"
         "split[a][b];"
         f"[a]palettegen=max_colors={options.colors}:stats_mode=diff[p];"
         f"[b][p]paletteuse=dither={options.dither.filter_value}"
     )
+
+
+def encoder_args(options: GifOptions) -> list[str]:
+    """Output options that select and tune the encoder for ``options.format``."""
+    if options.format is OutputFormat.WEBP:
+        return [
+            "-c:v",
+            "libwebp_anim",
+            "-lossless",
+            "0",
+            "-quality",
+            str(options.webp_quality),
+            "-loop",
+            "0",
+            "-an",
+            "-f",
+            "webp",
+        ]
+    if options.format is OutputFormat.MP4:
+        return [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            str(options.mp4_crf),
+            "-movflags",
+            "+faststart",
+            "-an",
+            "-f",
+            "mp4",
+        ]
+    return ["-loop", "0", "-f", "gif"]
 
 
 def build_command(
@@ -162,8 +232,7 @@ def build_command(
         *command,
         "-filter_complex",
         build_filtergraph(options, text_filter),
-        "-loop",
-        "0",
+        *encoder_args(options),
         str(dst),
     ]
 
@@ -180,7 +249,7 @@ def build_gifsicle_command(src: Path, dst: Path, lossy: int) -> list[str]:
     ]
 
 
-def convert_to_gif(
+def convert_video(
     src: Path,
     dst: Path,
     options: GifOptions | None = None,
@@ -192,10 +261,11 @@ def convert_to_gif(
     if overlay is not None:
         text_file = overlay.write_text_file(dst.with_name(f"{dst.stem}-text.txt"))
         text_filter = overlay.to_filter(text_file, settings.font_file)
-    # With lossy compression, FFmpeg writes an intermediate GIF for gifsicle.
-    ffmpeg_dst = dst.with_name(f"{dst.stem}-ffmpeg.gif") if options.lossy else dst
+    # With lossy GIF compression, FFmpeg writes an intermediate GIF for gifsicle.
+    use_gifsicle = options.format is OutputFormat.GIF and options.lossy > 0
+    ffmpeg_dst = dst.with_name(f"{dst.stem}-ffmpeg.gif") if use_gifsicle else dst
     _run(build_command(src, ffmpeg_dst, options, trim, text_filter), ffmpeg_dst, "ffmpeg")
-    if options.lossy:
+    if use_gifsicle:
         try:
             _run(build_gifsicle_command(ffmpeg_dst, dst, options.lossy), dst, "gifsicle")
         finally:

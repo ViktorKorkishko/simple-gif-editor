@@ -1,4 +1,4 @@
-"""Predict GIF file size and pick settings that fit a size budget.
+"""Predict output file size and pick settings that fit a size budget.
 
 Rendering a whole clip just to learn its size is slow, so the size is
 extrapolated from a few short samples spread over the clip. Each sample goes
@@ -15,8 +15,9 @@ from app.converter import (
     MIN_WIDTH,
     Dither,
     GifOptions,
+    OutputFormat,
     TrimRange,
-    convert_to_gif,
+    convert_video,
 )
 from app.overlay import TextOverlay
 
@@ -52,7 +53,7 @@ class TargetUnreachableError(ValueError):
         self.target_bytes = target_bytes
         self.smallest = smallest
         super().__init__(
-            f"cannot fit the GIF into {target_bytes / 1024:.0f} KB; the smallest "
+            f"cannot fit the file into {target_bytes / 1024:.0f} KB; the smallest "
             f"settings give about {smallest.bytes / 1024:.0f} KB. Try a shorter clip"
         )
 
@@ -88,6 +89,17 @@ def gif_overhead(colors: int) -> int:
     return 13 + 3 * table + 19 + 1
 
 
+# Rough size of the WebP and MP4 headers; small next to the frames either way.
+_CONTAINER_OVERHEAD = {OutputFormat.WEBP: 40, OutputFormat.MP4: 1000}
+
+
+def container_overhead(options: GifOptions) -> int:
+    """Bytes of the output file that do not depend on its length."""
+    if options.format is OutputFormat.GIF:
+        return gif_overhead(options.colors)
+    return _CONTAINER_OVERHEAD[options.format]
+
+
 def plan_samples(length: float, fps: int) -> list[tuple[float, float]]:
     """``(offset, duration)`` pairs, in seconds from the start of the clip.
 
@@ -103,13 +115,16 @@ def plan_samples(length: float, fps: int) -> list[tuple[float, float]]:
 def estimate_size(clip: Clip, options: GifOptions, workdir: Path) -> SizeEstimate:
     """Predict the size of the GIF ``clip`` makes with ``options``."""
     plan = plan_samples(clip.length, options.fps)
-    tag = f"{options.fps}-{options.width}-{options.colors}-{options.lossy}-{options.dither}"
+    tag = (
+        f"{options.fps}-{options.width}-{options.colors}-{options.lossy}-{options.dither}"
+        f".{options.format.extension}"
+    )
     sizes = []
     for i, (offset, duration) in enumerate(plan):
         overlay = clip.overlay.shifted(offset, duration) if clip.overlay else None
-        out = convert_to_gif(
+        out = convert_video(
             clip.src,
-            workdir / f"sample-{tag}-{i}.gif",
+            workdir / f"sample-{i}-{tag}",
             options,
             TrimRange(start=clip.start + offset, duration=duration),
             overlay,
@@ -118,7 +133,7 @@ def estimate_size(clip: Clip, options: GifOptions, workdir: Path) -> SizeEstimat
         if len(plan) == 1:
             return SizeEstimate(options, sizes[0], clip.length, exact=True, rendered=out)
         out.unlink()
-    overhead = gif_overhead(options.colors)
+    overhead = container_overhead(options)
     sampled = sum(duration for _, duration in plan)
     payload = sum(size - overhead for size in sizes)
     predicted = overhead + payload * clip.length / sampled
@@ -235,7 +250,7 @@ def convert_to_target(
             # Short clips are rendered in full while estimating.
             estimate.rendered.replace(dst)
             return estimate.options
-        convert_to_gif(clip.src, dst, estimate.options, _trim(clip), clip.overlay)
+        convert_video(clip.src, dst, estimate.options, _trim(clip), clip.overlay)
         actual = dst.stat().st_size
         if actual <= target_bytes:
             return estimate.options
