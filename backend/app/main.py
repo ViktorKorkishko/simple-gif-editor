@@ -1,7 +1,9 @@
 """HTTP API."""
 
+import logging
 import shutil
-import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -46,8 +48,20 @@ from app.overlay import (
     TextPosition,
 )
 from app.probe import ProbeError, probe_duration
+from app.workdirs import new_workdir, remove_stale_workdirs
 
-app = FastAPI(title="Simple GIF Editor", version="0.1.0")
+logger = logging.getLogger("uvicorn.error")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    removed = remove_stale_workdirs()
+    if removed:
+        logger.info("Removed %d stale work directories", removed)
+    yield
+
+
+app = FastAPI(title="Simple GIF Editor", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     BodySizeLimitMiddleware,
     max_bytes=lambda: settings.max_upload_bytes + FORM_OVERHEAD_BYTES,
@@ -236,7 +250,7 @@ def convert(file: Video, params: Params) -> FileResponse:
     The settings actually used are returned in the ``X-Gif-*`` headers, which
     matters in target size mode.
     """
-    workdir = Path(tempfile.mkdtemp(prefix="gif-"))
+    workdir = new_workdir()
     cleanup = BackgroundTask(shutil.rmtree, workdir, ignore_errors=True)
     dst = workdir / "output.gif"
     try:
@@ -276,7 +290,7 @@ def estimate(file: Video, params: Params) -> SizeEstimateResponse:
     With ``target_size_kb``, returns the settings that would be chosen to fit it.
     Long clips are sampled, so the size is approximate unless ``exact`` is true.
     """
-    workdir = Path(tempfile.mkdtemp(prefix="gif-"))
+    workdir = new_workdir()
     try:
         src = workdir / "input"
         _save_upload(file, src)
