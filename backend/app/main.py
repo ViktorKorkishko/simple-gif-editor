@@ -57,6 +57,8 @@ job_slots = JobSlots(settings.max_concurrent_jobs)
 
 CHUNK = 1024 * 1024
 MIN_TARGET_KB = 10
+# Container durations are not exact, so a clip a few ms over the limit passes.
+CLIP_TOLERANCE_S = 0.05
 
 
 class GifSettings(BaseModel):
@@ -242,12 +244,10 @@ def convert(file: Video, params: Params) -> FileResponse:
         _save_upload(file, src)
         options = params.options
         with job_slots.slot(settings.job_wait_s):
+            clip = _clip(src, params)
             if params.target_bytes is not None:
-                clip = _clip(src, params)
                 options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
             else:
-                if not params.trim.is_full:
-                    _clip(src, params)
                 convert_to_gif(src, dst, options, params.trim, params.overlay)
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -301,7 +301,7 @@ def estimate(file: Video, params: Params) -> SizeEstimateResponse:
 
 
 def _clip(src: Path, params: ConversionParams) -> Clip:
-    """Check the trim range against the video and describe the clip."""
+    """Check the trim range and clip length against the video and describe the clip."""
     try:
         video_duration = probe_duration(src)
     except ProbeError as exc:
@@ -310,7 +310,17 @@ def _clip(src: Path, params: ConversionParams) -> Clip:
         params.trim.check_within(video_duration)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return Clip.from_trim(src, params.trim, video_duration, params.overlay)
+    clip = Clip.from_trim(src, params.trim, video_duration, params.overlay)
+    limit = settings.max_clip_seconds
+    if limit > 0 and clip.length > limit + CLIP_TOLERANCE_S:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"The GIF would be {clip.length:.1f} s long, the limit is {limit:g} s. "
+                "Choose a shorter part of the video"
+            ),
+        )
+    return clip
 
 
 def _settings_headers(options: GifOptions) -> dict[str, str]:

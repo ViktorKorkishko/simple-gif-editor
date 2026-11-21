@@ -14,6 +14,7 @@ class Settings:
     gifsicle_bin: str = os.getenv("GIFSICLE_BIN", "gifsicle")
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "100"))
     ffmpeg_timeout_s: int = int(os.getenv("FFMPEG_TIMEOUT_S", "120"))
+    max_clip_seconds: float = float(os.getenv("MAX_CLIP_SECONDS", "60"))
     max_concurrent_jobs: int = int(os.getenv("MAX_CONCURRENT_JOBS", "2"))
     job_wait_s: float = float(os.getenv("JOB_WAIT_S", "30"))
     font_file: Path = Path(os.getenv("FONT_FILE", str(DEFAULT_FONT)))
