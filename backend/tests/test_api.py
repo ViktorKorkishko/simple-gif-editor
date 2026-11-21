@@ -332,3 +332,22 @@ def test_mp4_to_target_size(client, sampled_video: Path):
     )
     assert resp.status_code == 200, resp.text
     assert len(resp.content) <= 20 * 1024
+
+
+def test_convert_with_effects(client, long_video: Path):
+    effects = json.dumps([{"type": "sepia", "amount": 60}, {"type": "blur", "start": 1, "end": 2}])
+    resp = post_trim(client, long_video, end=3, effects=effects, texts='[{"text": "hi"}]')
+    assert resp.status_code == 200, resp.text
+    assert resp.content[:6] == b"GIF89a"
+
+
+def test_estimate_with_effects(client, sampled_video: Path):
+    effects = json.dumps([{"type": "grayscale", "start": 5}])
+    resp = post_form(client, "/api/estimate", sampled_video, width=80, effects=effects)
+    assert resp.status_code == 200, resp.text
+
+
+def test_convert_rejects_bad_effects(client, sample_video: Path):
+    resp = post_trim(client, sample_video, effects='[{"type": "glow"}]')
+    assert resp.status_code == 422
+    assert "effects[0.type]" in resp.json()["detail"]

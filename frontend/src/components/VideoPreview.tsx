@@ -1,4 +1,5 @@
 import { type CSSProperties, forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { previewFilter } from "../lib/effects";
 import { activeTexts, type EditorSettings, type TextLayer, type TextPosition } from "../lib/settings";
 
 // Must match EDGE_MARGIN and BOX_PADDING in backend/app/overlay.py.
@@ -201,6 +202,7 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, Props>(function Video
       <video
         ref={video}
         src={src}
+        style={{ filter: previewFilter(settings.effects, gifTime, scale) }}
         playsInline
         muted
         preload="auto"

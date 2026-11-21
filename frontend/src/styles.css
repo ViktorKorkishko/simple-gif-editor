@@ -820,14 +820,38 @@ input[type="checkbox"] {
 /* ---- Sidebar ---- */
 
 .sidebar {
-  position: relative;
+  display: flex;
   flex: 1 1 340px;
+  flex-direction: column;
   min-height: 440px;
   border-left: 1px solid var(--line);
   background: var(--surface);
 }
 
-.text-panel {
+.sidebar-tabs {
+  flex: none;
+  margin: 16px 16px 0;
+}
+
+.sidebar-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+}
+
+.sidebar-tabs button[aria-selected="true"] {
+  background: var(--raised-active);
+  color: var(--text);
+}
+
+.sidebar-body {
+  position: relative;
+  flex: 1;
+}
+
+.side-panel {
   position: absolute;
   inset: 0;
   display: flex;
@@ -844,25 +868,35 @@ input[type="checkbox"] {
     border-left: 0;
   }
 
-  .text-panel {
+  .side-panel {
     position: static;
   }
 }
 
-.sidebar-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 12px;
-  border-radius: var(--radius);
-  background: var(--bg);
-  font-size: 13px;
-  font-weight: 600;
+.side-panel > * {
+  flex-shrink: 0;
 }
 
-.text-panel > * {
-  flex-shrink: 0;
+.effect-types {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.effect-types button {
+  height: 34px;
+  padding: 0 6px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.effect-types button[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--raised-active);
 }
 
 .add-layer {
@@ -1219,6 +1253,18 @@ input[type="checkbox"] {
   font-size: 12px;
   font-weight: 500;
   text-align: left;
+}
+
+.effect-track {
+  position: relative;
+  height: 30px;
+  margin-top: 6px;
+  border-radius: 6px;
+  background: var(--track);
+}
+
+.text-clip.effect-clip {
+  background: #2f3a33;
 }
 
 .text-clip.selected {

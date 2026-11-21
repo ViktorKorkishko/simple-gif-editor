@@ -1,13 +1,14 @@
 """Text overlay rendered with FFmpeg's ``drawtext`` filter."""
 
 import json
-import math
 import re
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+
+from app.timing import check_time_range, enable_expression, enable_option, shift_range
 
 MAX_TEXT_LENGTH = 500
 MIN_FONT_SIZE, MAX_FONT_SIZE = 8, 200
@@ -122,11 +123,7 @@ class TextOverlay:
         for name, offset in (("x", self.x), ("y", self.y)):
             if offset is not None and not 0 <= offset <= MAX_OFFSET:
                 raise ValueError(f"{name} must be between 0 and {MAX_OFFSET}")
-        for name, t in (("text start", self.start), ("text end", self.end)):
-            if t is not None and (not math.isfinite(t) or t < 0):
-                raise ValueError(f"{name} must be a non-negative number")
-        if self.start is not None and self.end is not None and self.end <= self.start:
-            raise ValueError("text end must be greater than text start")
+        check_time_range("text", self.start, self.end)
 
     @property
     def coordinates(self) -> tuple[str, str]:
@@ -138,13 +135,7 @@ class TextOverlay:
     @property
     def enable_expression(self) -> str | None:
         """drawtext ``enable`` expression for the time range, if one is set."""
-        if self.start is None and self.end is None:
-            return None
-        if self.end is None:
-            return f"gte(t,{self.start:g})"
-        if self.start is None:
-            return f"lt(t,{self.end:g})"
-        return f"between(t,{self.start:g},{self.end:g})"
+        return enable_expression(self.start, self.end)
 
     def to_filter(self, text_file: Path, font_file: Path) -> str:
         """Build the drawtext filter.
@@ -166,10 +157,7 @@ class TextOverlay:
             options += [f"borderw={self.outline}", f"bordercolor={self.outline_color}"]
         if self.box:
             options += ["box=1", f"boxcolor={self.box_color}", f"boxborderw={BOX_PADDING}"]
-        enable = self.enable_expression
-        if enable is not None:
-            # The commas inside the expression would otherwise split the graph.
-            options.append(f"enable='{enable}'")
+        options += enable_option(self.start, self.end)
         return "drawtext=" + ":".join(options)
 
     def shifted(self, offset: float, length: float) -> "TextOverlay | None":
@@ -180,11 +168,10 @@ class TextOverlay:
         """
         if self.start is None and self.end is None:
             return self
-        start = (self.start or 0.0) - offset
-        end = None if self.end is None else self.end - offset
-        if start >= length or (end is not None and end <= 0):
+        shifted = shift_range(self.start, self.end, offset, length)
+        if shifted is None:
             return None
-        return replace(self, start=start if start > 0 else None, end=end)
+        return replace(self, start=shifted[0], end=shifted[1])
 
     def write_text_file(self, path: Path) -> Path:
         """Save the text for drawtext's ``textfile`` option (UTF-8, LF newlines)."""

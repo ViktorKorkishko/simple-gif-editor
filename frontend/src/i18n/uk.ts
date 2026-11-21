@@ -58,6 +58,32 @@ export const uk: Messages = {
     scrub: "Вибрати кадр на шкалі",
     video: "Відео",
     text: "Текст",
+    effects: "Ефекти",
+  },
+
+  sidebar: {
+    tabs: "Інструменти редагування",
+  },
+
+  effects: {
+    title: "Ефекти",
+    add: "Додати ефект",
+    list: "Ефекти",
+    remove: "Видалити ефект",
+    type: "Тип ефекту",
+    types: {
+      grayscale: "Чорно-біле",
+      sepia: "Сепія",
+      blur: "Розмиття",
+      brightness: "Яскравість",
+      contrast: "Контраст",
+      saturation: "Насиченість",
+    },
+    timeRange: "Проміжок",
+    amount: "Інтенсивність",
+    none: "Додайте ефект, щоб змінити вигляд відео.",
+    limit: (max) => `Не більше ${max} ефектів`,
+    note: "Ефект діє лише в межах свого проміжку, що рахується від початку GIF. Текст малюється поверх ефектів.",
   },
 
   text: {
@@ -191,6 +217,10 @@ export const uk: Messages = {
       lossy: "Рівень lossy",
     },
     inLayer: (index, problem) => `Текст ${index}: ${problem}`,
+    effectAmount: "Інтенсивність ефекту має бути від 0 до 100.",
+    effectAfterGif: "Ефект має починатися до кінця GIF.",
+    effectEndsBeforeStart: "Ефект має закінчуватися після початку.",
+    inEffect: (index, problem) => `Ефект ${index}: ${problem}`,
     targetTooSmall: (min) => `Цільовий розмір має бути щонайменше ${min} КБ.`,
   },
 };

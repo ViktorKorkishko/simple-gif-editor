@@ -33,6 +33,7 @@ from app.converter import (
     TrimRange,
     convert_video,
 )
+from app.effects import Effect, parse_effects
 from app.estimate import (
     Clip,
     TargetUnreachableError,
@@ -116,6 +117,7 @@ class ConversionParams:
     options: GifOptions
     trim: TrimRange
     overlays: tuple[TextOverlay, ...]
+    effects: tuple[Effect, ...]
     target_bytes: int | None
 
 
@@ -222,6 +224,17 @@ def conversion_params(
             ),
         ),
     ] = None,
+    effects: Annotated[
+        str | None,
+        Form(
+            description=(
+                "Video effects as a JSON array of objects with type (grayscale, sepia, blur, "
+                "brightness, contrast, saturation), amount (0-100, default 100) and optional "
+                "start and end in seconds from the start of the output. Applied in order, "
+                "under the text"
+            ),
+        ),
+    ] = None,
 ) -> ConversionParams:
     try:
         options = resolve_options(
@@ -247,12 +260,14 @@ def conversion_params(
             overlays.append(single)
         if texts:
             overlays += parse_text_layers(texts)
+        effect_list = parse_effects(effects) if effects else []
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ConversionParams(
         options=options,
         trim=trim,
         overlays=tuple(overlays),
+        effects=tuple(effect_list),
         target_bytes=None if target_size_kb is None else target_size_kb * 1024,
     )
 
@@ -291,7 +306,7 @@ def convert(file: Video, params: Params) -> FileResponse:
             if params.target_bytes is not None:
                 options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
             else:
-                convert_video(src, dst, options, params.trim, params.overlays)
+                convert_video(src, dst, options, params.trim, params.overlays, params.effects)
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
@@ -353,7 +368,7 @@ def _clip(src: Path, params: ConversionParams) -> Clip:
         params.trim.check_within(video_duration)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    clip = Clip.from_trim(src, params.trim, video_duration, params.overlays)
+    clip = Clip.from_trim(src, params.trim, video_duration, params.overlays, params.effects)
     limit = settings.max_clip_seconds
     if limit > 0 and clip.length > limit + CLIP_TOLERANCE_S:
         raise HTTPException(

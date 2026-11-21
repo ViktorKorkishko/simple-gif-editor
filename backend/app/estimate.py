@@ -19,6 +19,7 @@ from app.converter import (
     TrimRange,
     convert_video,
 )
+from app.effects import Effect
 from app.overlay import TextOverlay
 
 SAMPLE_COUNT = 3
@@ -60,12 +61,13 @@ class TargetUnreachableError(ValueError):
 
 @dataclass(frozen=True)
 class Clip:
-    """The part of the video that becomes the output, with its text overlays."""
+    """The part of the video that becomes the output, with its effects and text."""
 
     src: Path
     start: float
     length: float
     overlays: tuple[TextOverlay, ...] = ()
+    effects: tuple[Effect, ...] = ()
 
     @classmethod
     def from_trim(
@@ -74,10 +76,11 @@ class Clip:
         trim: TrimRange,
         video_duration: float,
         overlays: tuple[TextOverlay, ...] = (),
+        effects: tuple[Effect, ...] = (),
     ) -> "Clip":
         stop = min(trim.stop or video_duration, video_duration)
         length = max(stop - trim.start, 0.0)
-        return cls(src=src, start=trim.start, length=length, overlays=overlays)
+        return cls(src=src, start=trim.start, length=length, overlays=overlays, effects=effects)
 
 
 def gif_overhead(colors: int) -> int:
@@ -124,12 +127,15 @@ def estimate_size(clip: Clip, options: GifOptions, workdir: Path) -> SizeEstimat
     for i, (offset, duration) in enumerate(plan):
         shifted = (overlay.shifted(offset, duration) for overlay in clip.overlays)
         overlays = [overlay for overlay in shifted if overlay is not None]
+        moved = (effect.shifted(offset, duration) for effect in clip.effects)
+        effects = [effect for effect in moved if effect is not None]
         out = convert_video(
             clip.src,
             workdir / f"sample-{i}-{tag}",
             options,
             TrimRange(start=clip.start + offset, duration=duration),
             overlays,
+            effects,
         )
         sizes.append(out.stat().st_size)
         if len(plan) == 1:
@@ -252,7 +258,7 @@ def convert_to_target(
             # Short clips are rendered in full while estimating.
             estimate.rendered.replace(dst)
             return estimate.options
-        convert_video(clip.src, dst, estimate.options, _trim(clip), clip.overlays)
+        convert_video(clip.src, dst, estimate.options, _trim(clip), clip.overlays, clip.effects)
         actual = dst.stat().st_size
         if actual <= target_bytes:
             return estimate.options
