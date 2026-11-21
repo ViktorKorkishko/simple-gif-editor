@@ -1,13 +1,44 @@
 """Guards that keep one busy or abusive client from exhausting the server."""
 
 import json
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 # Room for the form fields and multipart boundaries around the uploaded file.
 FORM_OVERHEAD_BYTES = 1024 * 1024
+
+
+RETRY_AFTER_S = 10
+
+
+class JobSlots:
+    """Caps how many conversions run at once.
+
+    FFmpeg is CPU and memory heavy, so running every request in parallel
+    slows all of them down and can run the server out of memory. Extra
+    requests wait up to ``wait_s`` for a free slot, then get 503.
+    """
+
+    def __init__(self, size: int) -> None:
+        self.size = size
+        self._semaphore = threading.BoundedSemaphore(size)
+
+    @contextmanager
+    def slot(self, wait_s: float) -> Iterator[None]:
+        if not self._semaphore.acquire(timeout=max(wait_s, 0)):
+            raise HTTPException(
+                status_code=503,
+                detail="The server is busy with other conversions, try again shortly",
+                headers={"Retry-After": str(RETRY_AFTER_S)},
+            )
+        try:
+            yield
+        finally:
+            self._semaphore.release()
 
 
 class BodyTooLargeError(HTTPException):

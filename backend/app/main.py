@@ -35,7 +35,7 @@ from app.estimate import (
     estimate_size,
     fit_to_target,
 )
-from app.limits import FORM_OVERHEAD_BYTES, BodySizeLimitMiddleware
+from app.limits import FORM_OVERHEAD_BYTES, BodySizeLimitMiddleware, JobSlots
 from app.overlay import (
     MAX_FONT_SIZE,
     MAX_OFFSET,
@@ -52,6 +52,8 @@ app.add_middleware(
     BodySizeLimitMiddleware,
     max_bytes=lambda: settings.max_upload_bytes + FORM_OVERHEAD_BYTES,
 )
+
+job_slots = JobSlots(settings.max_concurrent_jobs)
 
 CHUNK = 1024 * 1024
 MIN_TARGET_KB = 10
@@ -239,13 +241,14 @@ def convert(file: Video, params: Params) -> FileResponse:
         src = workdir / "input"
         _save_upload(file, src)
         options = params.options
-        if params.target_bytes is not None:
-            clip = _clip(src, params)
-            options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
-        else:
-            if not params.trim.is_full:
-                _clip(src, params)
-            convert_to_gif(src, dst, options, params.trim, params.overlay)
+        with job_slots.slot(settings.job_wait_s):
+            if params.target_bytes is not None:
+                clip = _clip(src, params)
+                options = convert_to_target(clip, options, params.target_bytes, workdir, dst)
+            else:
+                if not params.trim.is_full:
+                    _clip(src, params)
+                convert_to_gif(src, dst, options, params.trim, params.overlay)
     except HTTPException:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
@@ -277,11 +280,12 @@ def estimate(file: Video, params: Params) -> SizeEstimateResponse:
     try:
         src = workdir / "input"
         _save_upload(file, src)
-        clip = _clip(src, params)
-        if params.target_bytes is not None:
-            result = fit_to_target(clip, params.options, params.target_bytes, workdir)
-        else:
-            result = estimate_size(clip, params.options, workdir)
+        with job_slots.slot(settings.job_wait_s):
+            clip = _clip(src, params)
+            if params.target_bytes is not None:
+                result = fit_to_target(clip, params.options, params.target_bytes, workdir)
+            else:
+                result = estimate_size(clip, params.options, workdir)
     except TargetUnreachableError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ConversionError as exc:

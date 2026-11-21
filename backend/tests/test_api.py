@@ -1,8 +1,11 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from app import main
 from app.config import settings
+from app.limits import JobSlots
 from app.probe import probe_duration
 
 
@@ -233,3 +236,12 @@ def test_estimate_rejects_bad_fields(client, long_video: Path, fields):
 def test_estimate_rejects_garbage(client):
     resp = client.post("/api/estimate", files={"file": ("x.mp4", b"nope")})
     assert resp.status_code == 422
+
+
+def test_convert_returns_503_when_busy(client, sample_video: Path, monkeypatch):
+    monkeypatch.setattr(main, "job_slots", JobSlots(1))
+    monkeypatch.setattr(main, "settings", replace(settings, job_wait_s=0))
+    with main.job_slots.slot(0), sample_video.open("rb") as f:
+        resp = client.post("/api/convert", files={"file": ("clip.mp4", f, "video/mp4")})
+    assert resp.status_code == 503
+    assert resp.headers["retry-after"] == "10"

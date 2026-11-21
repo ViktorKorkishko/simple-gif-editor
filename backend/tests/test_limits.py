@@ -1,9 +1,12 @@
+import threading
 from typing import Annotated
 
+import pytest
 from fastapi import FastAPI, File, UploadFile
 from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException
 
-from app.limits import BodySizeLimitMiddleware
+from app.limits import BodySizeLimitMiddleware, JobSlots
 
 
 def make_client(limit: int) -> tuple[TestClient, list[int]]:
@@ -62,3 +65,37 @@ def test_chunked_body_over_limit_is_cut_off():
 def test_requests_without_body_are_untouched():
     client, _ = make_client(1)
     assert client.get("/docs").status_code == 200
+
+
+def test_job_slots_let_jobs_through_up_to_the_limit():
+    slots = JobSlots(2)
+    with slots.slot(0), slots.slot(0):
+        pass
+    with slots.slot(0):
+        pass
+
+
+def test_job_slots_refuse_when_full():
+    slots = JobSlots(1)
+    with slots.slot(0), pytest.raises(HTTPException) as exc_info, slots.slot(0.01):
+        pass
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.headers == {"Retry-After": "10"}
+    with slots.slot(0):
+        pass
+
+
+def test_job_slots_wait_for_a_free_slot():
+    slots = JobSlots(1)
+    release = threading.Event()
+
+    def hold() -> None:
+        with slots.slot(0):
+            release.wait()
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    threading.Timer(0.05, release.set).start()
+    with slots.slot(2):
+        pass
+    holder.join()
