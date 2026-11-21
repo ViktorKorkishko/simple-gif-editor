@@ -3,6 +3,7 @@ import { uk } from "../i18n/uk";
 import {
   DEFAULT_SETTINGS,
   clipLength,
+  newEffect,
   newTextLayer,
   toFormFields,
   validate,
@@ -78,6 +79,25 @@ describe("toFormFields", () => {
         start: 1.235,
       },
     ]);
+  });
+});
+
+describe("effects", () => {
+  it("sends effects as JSON", () => {
+    expect(toFormFields(make(), 10)).not.toHaveProperty("effects");
+    const effects = [newEffect({ type: "blur", amount: 40, start: 1, end: 2 }), newEffect({ type: "sepia" })];
+    expect(JSON.parse(toFormFields(make({ effects }), 10).effects)).toEqual([
+      { type: "blur", amount: 40, start: 1, end: 2 },
+      { type: "sepia", amount: 100 },
+    ]);
+  });
+
+  it("checks effect timing", () => {
+    expect(validate(make({ effects: [newEffect({ start: 2, end: 1 })] }), 10)).toEqual([
+      "Effect must end after it starts.",
+    ]);
+    const effects = [newEffect(), newEffect({ start: 20 })];
+    expect(validate(make({ effects }), 10)).toEqual(["Effect 2: Effect must start before the GIF ends."]);
   });
 });
 

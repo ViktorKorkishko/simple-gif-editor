@@ -1,6 +1,6 @@
 /** English UI text. Every other language must provide the same keys. */
 
-import type { OutputFormat, TextPosition, Preset } from "../lib/settings";
+import type { EffectType, OutputFormat, TextPosition, Preset } from "../lib/settings";
 
 const plural = new Intl.PluralRules("en");
 
@@ -52,6 +52,32 @@ export const en = {
     scrub: "Pick a frame on the timeline",
     video: "Video",
     text: "Text",
+    effects: "Effects",
+  },
+
+  sidebar: {
+    tabs: "Editing tools",
+  },
+
+  effects: {
+    title: "Effects",
+    add: "Add effect",
+    list: "Effects",
+    remove: "Remove effect",
+    type: "Effect type",
+    types: {
+      grayscale: "Black & white",
+      sepia: "Sepia",
+      blur: "Blur",
+      brightness: "Brightness",
+      contrast: "Contrast",
+      saturation: "Saturation",
+    } satisfies Record<EffectType, string>,
+    timeRange: "Time range",
+    amount: "Intensity",
+    none: "Add an effect to change the look of the video.",
+    limit: (max: number) => `At most ${max} effects`,
+    note: "An effect only applies within its time range, counted from the start of the GIF. Text is drawn on top of effects.",
   },
 
   text: {
@@ -186,6 +212,10 @@ export const en = {
       lossy: "Lossy level",
     },
     inLayer: (index: number, problem: string) => `Text ${index}: ${problem}`,
+    effectAmount: "Effect intensity must be between 0 and 100.",
+    effectAfterGif: "Effect must start before the GIF ends.",
+    effectEndsBeforeStart: "Effect must end after it starts.",
+    inEffect: (index: number, problem: string) => `Effect ${index}: ${problem}`,
     targetTooSmall: (min: number) => `Target size must be at least ${min} KB.`,
   },
 };

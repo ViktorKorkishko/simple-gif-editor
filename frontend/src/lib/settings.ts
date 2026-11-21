@@ -34,6 +34,7 @@ export const LIMITS = {
   textOutline: [0, 10],
   textLength: 500,
   textLayers: 10,
+  effects: 10,
   minTargetKb: 10,
 } as const;
 
@@ -65,12 +66,27 @@ export interface TextLayer {
   end: number | null;
 }
 
+export const EFFECT_TYPES = ["grayscale", "sepia", "blur", "brightness", "contrast", "saturation"] as const;
+export type EffectType = (typeof EFFECT_TYPES)[number];
+
+/** A video effect. Effects apply in list order, under the text. */
+export interface EffectLayer {
+  id: string;
+  type: EffectType;
+  /** Strength from 0 to 100. */
+  amount: number;
+  /** Seconds from the start of the GIF; null means the whole GIF. */
+  start: number | null;
+  end: number | null;
+}
+
 export interface EditorSettings {
   /** Trim range in seconds; `end` null means the end of the video. */
   start: number;
   end: number | null;
 
   texts: TextLayer[];
+  effects: EffectLayer[];
 
   format: OutputFormat;
   mode: CompressionMode;
@@ -100,10 +116,17 @@ export function newTextLayer(patch: Partial<TextLayer> = {}): TextLayer {
   };
 }
 
+let nextEffectId = 1;
+
+export function newEffect(patch: Partial<EffectLayer> = {}): EffectLayer {
+  return { id: `effect-${nextEffectId++}`, type: "grayscale", amount: 100, start: null, end: null, ...patch };
+}
+
 export const DEFAULT_SETTINGS: EditorSettings = {
   start: 0,
   end: null,
   texts: [newTextLayer()],
+  effects: [],
   format: "gif",
   mode: "preset",
   preset: "medium",
@@ -166,6 +189,18 @@ export function validate(
     for (const problem of problems) errors.push(multiple ? messages.inLayer(index + 1, problem) : problem);
   });
 
+  const multipleEffects = settings.effects.length > 1;
+  settings.effects.forEach((effect, index) => {
+    const problems: string[] = [];
+    if (!inRange(effect.amount, [0, 100])) problems.push(messages.effectAmount);
+    if (effect.start !== null && length !== null && effect.start >= length)
+      problems.push(messages.effectAfterGif);
+    if (effect.start !== null && effect.end !== null && effect.end <= effect.start)
+      problems.push(messages.effectEndsBeforeStart);
+    for (const problem of problems)
+      errors.push(multipleEffects ? messages.inEffect(index + 1, problem) : problem);
+  });
+
   const overrideKeys: (keyof Overrides)[] = ["fps", "width", "colors", "lossy"];
   for (const key of overrideKeys) {
     const value = settings.overrides[key];
@@ -219,6 +254,17 @@ export function toFormFields(
         ...(layer.box && { box: true, box_color: `${layer.boxColor}@${layer.boxOpacity.toFixed(2)}` }),
         ...(layer.start !== null && { start: Math.round(layer.start * 1000) / 1000 }),
         ...(layer.end !== null && { end: Math.round(layer.end * 1000) / 1000 }),
+      })),
+    );
+  }
+
+  if (settings.effects.length > 0) {
+    fields.effects = JSON.stringify(
+      settings.effects.map((effect) => ({
+        type: effect.type,
+        amount: Math.round(effect.amount),
+        ...(effect.start !== null && { start: Math.round(effect.start * 1000) / 1000 }),
+        ...(effect.end !== null && { end: Math.round(effect.end * 1000) / 1000 }),
       })),
     );
   }

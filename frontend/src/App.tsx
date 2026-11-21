@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { EffectsPanel } from "./components/EffectsPanel";
 import { ExportMenu, type ConvertState } from "./components/ExportMenu";
 import { FilePicker } from "./components/FilePicker";
-import { DownloadIcon, FilmIcon, LogoMark } from "./components/Icons";
+import { DownloadIcon, EffectIcon, FilmIcon, LogoMark, TextIcon } from "./components/Icons";
 import { LanguageSwitcher } from "./components/LanguageSwitcher";
 import { PlayerControls } from "./components/PlayerControls";
 import { CAPTION_INPUT_ID, TextPanel } from "./components/TextPanel";
@@ -16,10 +17,12 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_WIDTH,
   clipLength,
+  newEffect,
   newTextLayer,
   toFormFields,
   validate,
   type EditorSettings,
+  type EffectLayer,
   type TextLayer,
 } from "./lib/settings";
 
@@ -35,6 +38,8 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [settings, setSettings] = useState<EditorSettings>(DEFAULT_SETTINGS);
   const [selectedText, setSelectedText] = useState<string | null>(DEFAULT_SETTINGS.texts[0]?.id ?? null);
+  const [selectedEffect, setSelectedEffect] = useState<string | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<"text" | "effects">("text");
   const [presets, setPresets] = useState<PresetTable | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [convertState, setConvertState] = useState<ConvertState>({ status: "idle" });
@@ -74,8 +79,26 @@ export default function App() {
       start: 0,
       end: null,
       texts: current.texts.map((layer) => ({ ...layer, start: null, end: null })),
+      effects: current.effects.map((effect) => ({ ...effect, start: null, end: null })),
     }));
   };
+
+  const addEffect = () => {
+    const effect = newEffect();
+    setSettings((current) => ({ ...current, effects: [...current.effects, effect] }));
+    setSelectedEffect(effect.id);
+  };
+  const removeEffect = (id: string) => {
+    const index = settings.effects.findIndex((effect) => effect.id === id);
+    const rest = settings.effects.filter((effect) => effect.id !== id);
+    update({ effects: rest });
+    if (selectedEffect === id) setSelectedEffect(rest[Math.min(index, rest.length - 1)]?.id ?? null);
+  };
+  const changeEffect = (id: string, patch: Partial<EffectLayer>) =>
+    setSettings((current) => ({
+      ...current,
+      effects: current.effects.map((effect) => (effect.id === id ? { ...effect, ...patch } : effect)),
+    }));
 
   const focusCaption = () => requestAnimationFrame(() => document.getElementById(CAPTION_INPUT_ID)?.focus());
   const addText = () => {
@@ -255,14 +278,56 @@ export default function App() {
             </main>
 
             <aside className="sidebar">
-              <TextPanel
-                texts={settings.texts}
-                selectedId={selectedText}
-                onSelect={setSelectedText}
-                onAdd={addText}
-                onRemove={removeText}
-                onChange={changeText}
-              />
+              <div className="segmented sidebar-tabs" role="tablist" aria-label={t.sidebar.tabs}>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-text"
+                  aria-controls="panel-text"
+                  aria-selected={sidebarTab === "text"}
+                  onClick={() => setSidebarTab("text")}
+                >
+                  <TextIcon />
+                  <span>{t.text.title}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-effects"
+                  aria-controls="panel-effects"
+                  aria-selected={sidebarTab === "effects"}
+                  onClick={() => setSidebarTab("effects")}
+                >
+                  <EffectIcon />
+                  <span>{t.effects.title}</span>
+                </button>
+              </div>
+              <div
+                className="sidebar-body"
+                role="tabpanel"
+                id={`panel-${sidebarTab}`}
+                aria-labelledby={`tab-${sidebarTab}`}
+              >
+                {sidebarTab === "text" ? (
+                  <TextPanel
+                    texts={settings.texts}
+                    selectedId={selectedText}
+                    onSelect={setSelectedText}
+                    onAdd={addText}
+                    onRemove={removeText}
+                    onChange={changeText}
+                  />
+                ) : (
+                  <EffectsPanel
+                    effects={settings.effects}
+                    selectedId={selectedEffect}
+                    onSelect={setSelectedEffect}
+                    onAdd={addEffect}
+                    onRemove={removeEffect}
+                    onChange={changeEffect}
+                  />
+                )}
+              </div>
             </aside>
           </div>
 
@@ -274,8 +339,14 @@ export default function App() {
             onSeek={seek}
             selectedText={selectedText}
             onTextClick={(id) => {
+              setSidebarTab("text");
               setSelectedText(id);
               focusCaption();
+            }}
+            selectedEffect={selectedEffect}
+            onEffectClick={(id) => {
+              setSidebarTab("effects");
+              setSelectedEffect(id);
             }}
           />
         </>
