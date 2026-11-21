@@ -1,15 +1,19 @@
 """Text overlay rendered with FFmpeg's ``drawtext`` filter."""
 
+import json
 import math
 import re
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+
 MAX_TEXT_LENGTH = 500
 MIN_FONT_SIZE, MAX_FONT_SIZE = 8, 200
 MAX_OUTLINE = 10
 MAX_OFFSET = 4000
+MAX_TEXT_LAYERS = 10
 # Gap between the text and the edge of the frame for the position presets, in px.
 EDGE_MARGIN = 10
 # Padding around the text inside the background box, in px.
@@ -186,3 +190,67 @@ class TextOverlay:
         """Save the text for drawtext's ``textfile`` option (UTF-8, LF newlines)."""
         path.write_text(self.text.replace("\r\n", "\n").replace("\r", "\n"), encoding="utf-8")
         return path
+
+
+class TextLayer(BaseModel):
+    """One entry of the ``texts`` form field, before range checks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    size: int = 32
+    color: str = "white"
+    position: TextPosition = TextPosition.BOTTOM
+    x: int | None = None
+    y: int | None = None
+    outline: int = 2
+    outline_color: str = "black"
+    box: bool = False
+    box_color: str = "black@0.5"
+    start: float | None = None
+    end: float | None = None
+
+    def to_overlay(self) -> TextOverlay:
+        return TextOverlay(
+            text=self.text,
+            font_size=self.size,
+            color=self.color,
+            position=self.position,
+            x=self.x,
+            y=self.y,
+            outline=self.outline,
+            outline_color=self.outline_color,
+            box=self.box,
+            box_color=self.box_color,
+            start=self.start,
+            end=self.end,
+        )
+
+
+_LAYERS = TypeAdapter(list[TextLayer])
+
+
+def parse_text_layers(raw: str) -> list[TextOverlay]:
+    """Overlays from a JSON array of text layers; blank texts are skipped.
+
+    Raises ``ValueError`` with a readable message for bad JSON or values.
+    """
+    try:
+        layers = _LAYERS.validate_python(json.loads(raw))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"texts must be a JSON array: {exc.msg}") from exc
+    except ValidationError as exc:
+        error = exc.errors()[0]
+        where = ".".join(str(part) for part in error["loc"])
+        raise ValueError(f"texts[{where}]: {error['msg']}" if where else error["msg"]) from exc
+    if len(layers) > MAX_TEXT_LAYERS:
+        raise ValueError(f"at most {MAX_TEXT_LAYERS} text layers are allowed")
+    overlays = []
+    for index, layer in enumerate(layers):
+        if not layer.text.strip():
+            continue
+        try:
+            overlays.append(layer.to_overlay())
+        except ValueError as exc:
+            raise ValueError(f"text layer {index + 1}: {exc}") from exc
+    return overlays

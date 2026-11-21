@@ -60,12 +60,12 @@ class TargetUnreachableError(ValueError):
 
 @dataclass(frozen=True)
 class Clip:
-    """The part of the video that becomes the GIF, with its overlay."""
+    """The part of the video that becomes the output, with its text overlays."""
 
     src: Path
     start: float
     length: float
-    overlay: TextOverlay | None = None
+    overlays: tuple[TextOverlay, ...] = ()
 
     @classmethod
     def from_trim(
@@ -73,10 +73,11 @@ class Clip:
         src: Path,
         trim: TrimRange,
         video_duration: float,
-        overlay: TextOverlay | None = None,
+        overlays: tuple[TextOverlay, ...] = (),
     ) -> "Clip":
         stop = min(trim.stop or video_duration, video_duration)
-        return cls(src=src, start=trim.start, length=max(stop - trim.start, 0.0), overlay=overlay)
+        length = max(stop - trim.start, 0.0)
+        return cls(src=src, start=trim.start, length=length, overlays=overlays)
 
 
 def gif_overhead(colors: int) -> int:
@@ -121,13 +122,14 @@ def estimate_size(clip: Clip, options: GifOptions, workdir: Path) -> SizeEstimat
     )
     sizes = []
     for i, (offset, duration) in enumerate(plan):
-        overlay = clip.overlay.shifted(offset, duration) if clip.overlay else None
+        shifted = (overlay.shifted(offset, duration) for overlay in clip.overlays)
+        overlays = [overlay for overlay in shifted if overlay is not None]
         out = convert_video(
             clip.src,
             workdir / f"sample-{i}-{tag}",
             options,
             TrimRange(start=clip.start + offset, duration=duration),
-            overlay,
+            overlays,
         )
         sizes.append(out.stat().st_size)
         if len(plan) == 1:
@@ -250,7 +252,7 @@ def convert_to_target(
             # Short clips are rendered in full while estimating.
             estimate.rendered.replace(dst)
             return estimate.options
-        convert_video(clip.src, dst, estimate.options, _trim(clip), clip.overlay)
+        convert_video(clip.src, dst, estimate.options, _trim(clip), clip.overlays)
         actual = dst.stat().st_size
         if actual <= target_bytes:
             return estimate.options

@@ -4,7 +4,7 @@ import { NumberField } from "./NumberField";
 import { useI18n } from "../i18n/I18nProvider";
 import { roundTime } from "../lib/format";
 import { rulerTicks, tickLabel } from "../lib/timeline";
-import { clipLength, hasText, type EditorSettings } from "../lib/settings";
+import { activeTexts, clipLength, type EditorSettings } from "../lib/settings";
 
 interface Props {
   settings: EditorSettings;
@@ -14,7 +14,9 @@ interface Props {
   onChange: (patch: Partial<EditorSettings>) => void;
   /** Move the preview to this time. */
   onSeek: (seconds: number) => void;
-  onTextClick: () => void;
+  selectedText: string | null;
+  /** A caption's clip was clicked. */
+  onTextClick: (id: string) => void;
 }
 
 /** Shortest clip the handles allow, in seconds. */
@@ -28,7 +30,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function Timeline({ settings, duration, time, onChange, onSeek, onTextClick }: Props) {
+export function Timeline({ settings, duration, time, onChange, onSeek, selectedText, onTextClick }: Props) {
   const { t } = useI18n();
   const track = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -109,9 +111,16 @@ export function Timeline({ settings, duration, time, onChange, onSeek, onTextCli
 
   const pct = (seconds: number) => (duration ? `${(clamp(seconds, 0, duration) / duration) * 100}%` : "0%");
 
-  const showText = hasText(settings) && length !== null && length > 0;
-  const textFrom = start + Math.min(settings.textStart ?? 0, length ?? 0);
-  const textTo = start + Math.min(settings.textEnd ?? length ?? 0, length ?? 0);
+  const textClips =
+    length !== null && length > 0
+      ? activeTexts(settings)
+          .map((layer) => ({
+            layer,
+            from: start + Math.min(layer.start ?? 0, length),
+            to: start + Math.min(layer.end ?? length, length),
+          }))
+          .filter((clip) => clip.to > clip.from)
+      : [];
 
   return (
     <section className="timeline" aria-label={t.timeline.label}>
@@ -198,17 +207,19 @@ export function Timeline({ settings, duration, time, onChange, onSeek, onTextCli
               </div>
 
               <div className="text-track">
-                {showText && textTo > textFrom && (
+                {textClips.map(({ layer, from, to }) => (
                   <button
+                    key={layer.id}
                     type="button"
-                    className="text-clip"
-                    style={{ left: pct(textFrom), width: pct(textTo - textFrom) }}
-                    onClick={onTextClick}
+                    className={`text-clip${layer.id === selectedText ? " selected" : ""}`}
+                    style={{ left: pct(from), width: pct(to - from) }}
+                    aria-pressed={layer.id === selectedText}
+                    onClick={() => onTextClick(layer.id)}
                   >
                     <TextIcon size={13} />
-                    <span>{settings.text}</span>
+                    <span>{layer.text}</span>
                   </button>
-                )}
+                ))}
               </div>
 
               <button
