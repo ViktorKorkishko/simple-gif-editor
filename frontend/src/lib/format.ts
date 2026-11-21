@@ -31,3 +31,11 @@ export function formatTime(seconds: number): string {
 export function roundTime(seconds: number): number {
   return Math.round(seconds * 100) / 100;
 }
+
+/** Seconds as a zero-padded mm:ss.cc timecode, e.g. 75.256 -> "01:15.26". */
+export function formatTimecode(seconds: number): string {
+  const hundredths = Math.round(Math.max(0, Number.isFinite(seconds) ? seconds : 0) * 100);
+  const minutes = Math.floor(hundredths / 6000);
+  const rest = (hundredths - minutes * 6000) / 100;
+  return `${String(minutes).padStart(2, "0")}:${rest.toFixed(2).padStart(5, "0")}`;
+}

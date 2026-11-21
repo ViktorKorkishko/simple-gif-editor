@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
+import { FilmIcon, UploadIcon } from "./Icons";
 import { useI18n } from "../i18n/I18nProvider";
 
 interface Props {
   onFile: (file: File) => void;
+  /** A small header button instead of the big drop zone. */
   compact?: boolean;
 }
 
@@ -16,22 +18,32 @@ export function FilePicker({ onFile, compact }: Props) {
     if (file) onFile(file);
   };
 
+  const fileInput = (
+    <input
+      ref={input}
+      type="file"
+      accept="video/*"
+      hidden
+      onChange={(event) => {
+        pick(event.target.files);
+        event.target.value = "";
+      }}
+    />
+  );
+
   if (compact) {
     return (
       <>
-        <button type="button" className="button secondary" onClick={() => input.current?.click()}>
-          {t.filePicker.chooseAnother}
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={t.header.replaceVideo}
+          title={t.header.replaceVideo}
+          onClick={() => input.current?.click()}
+        >
+          <UploadIcon />
         </button>
-        <input
-          ref={input}
-          type="file"
-          accept="video/*"
-          hidden
-          onChange={(event) => {
-            pick(event.target.files);
-            event.target.value = "";
-          }}
-        />
+        {fileInput}
       </>
     );
   }
@@ -39,15 +51,8 @@ export function FilePicker({ onFile, compact }: Props) {
   return (
     <div
       className={`dropzone${dragging ? " dragging" : ""}`}
-      role="button"
-      tabIndex={0}
+      // The whole zone opens the picker for mouse users; the button below is the keyboard path.
       onClick={() => input.current?.click()}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          input.current?.click();
-        }
-      }}
       onDragOver={(event) => {
         event.preventDefault();
         setDragging(true);
@@ -59,21 +64,21 @@ export function FilePicker({ onFile, compact }: Props) {
         pick(event.dataTransfer.files);
       }}
     >
-      <div className="dropzone-icon" aria-hidden>
-        🎬
-      </div>
+      <FilmIcon size={40} className="dropzone-icon" />
       <p className="dropzone-title">{t.filePicker.dropTitle}</p>
-      <p className="muted">{t.filePicker.formats}</p>
-      <input
-        ref={input}
-        type="file"
-        accept="video/*"
-        hidden
-        onChange={(event) => {
-          pick(event.target.files);
-          event.target.value = "";
+      <p className="note">{t.filePicker.formats}</p>
+      <button
+        type="button"
+        className="button primary"
+        onClick={(event) => {
+          event.stopPropagation();
+          input.current?.click();
         }}
-      />
+      >
+        <UploadIcon size={18} />
+        <span>{t.filePicker.choose}</span>
+      </button>
+      {fileInput}
     </div>
   );
 }

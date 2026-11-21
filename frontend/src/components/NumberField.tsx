@@ -8,15 +8,33 @@ interface Props {
   max?: number;
   step?: number;
   placeholder?: string;
+  /** Short text inside the box before the number, e.g. "from". */
+  prefix?: string;
   suffix?: string;
   hint?: string;
+  /** Keep the label for screen readers only, e.g. when a prefix already says it. */
+  hideLabel?: boolean;
+  className?: string;
 }
 
 /**
  * A number input that tolerates half-typed values ("1.", "") without fighting
  * the user, and reports `null` when it is empty.
  */
-export function NumberField({ label, value, onChange, min, max, step, placeholder, suffix, hint }: Props) {
+export function NumberField({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  placeholder,
+  prefix,
+  suffix,
+  hint,
+  hideLabel,
+  className,
+}: Props) {
   const id = useId();
   const [text, setText] = useState(value === null ? "" : String(value));
 
@@ -27,9 +45,16 @@ export function NumberField({ label, value, onChange, min, max, step, placeholde
   }, [value]);
 
   return (
-    <label className="field" htmlFor={id}>
-      <span className="field-label">{label}</span>
-      <span className="field-input">
+    <div className={`field${className ? ` ${className}` : ""}`}>
+      <label className={hideLabel ? "visually-hidden" : "field-label"} htmlFor={id}>
+        {label}
+      </label>
+      <span className="input-box">
+        {prefix && (
+          <span className="input-affix" aria-hidden>
+            {prefix}
+          </span>
+        )}
         <input
           id={id}
           type="number"
@@ -46,9 +71,13 @@ export function NumberField({ label, value, onChange, min, max, step, placeholde
             else if (Number.isFinite(Number(next))) onChange(Number(next));
           }}
         />
-        {suffix && <span className="suffix">{suffix}</span>}
+        {suffix && (
+          <span className="input-affix" aria-hidden>
+            {suffix}
+          </span>
+        )}
       </span>
       {hint && <span className="field-hint">{hint}</span>}
-    </label>
+    </div>
   );
 }

@@ -1,3 +1,4 @@
+import { GlobeIcon } from "./Icons";
 import { useI18n } from "../i18n/I18nProvider";
 import { LANGUAGES, LANGUAGE_NAMES } from "../i18n/language";
 
@@ -6,6 +7,7 @@ export function LanguageSwitcher() {
 
   return (
     <div className="language-switcher" role="group" aria-label={t.language.label}>
+      <GlobeIcon className="language-icon" />
       {LANGUAGES.map((option) => (
         <button
           key={option}
@@ -14,7 +16,6 @@ export function LanguageSwitcher() {
           title={LANGUAGE_NAMES[option].name}
           aria-label={LANGUAGE_NAMES[option].name}
           aria-pressed={language === option}
-          className={language === option ? "selected" : ""}
           onClick={() => setLanguage(option)}
         >
           {LANGUAGE_NAMES[option].short}
