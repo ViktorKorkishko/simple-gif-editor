@@ -13,6 +13,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+from starlette.responses import Response
+from starlette.types import Scope
 
 from app.compression import PRESETS, CompressionPreset, resolve_options
 from app.config import settings
@@ -361,13 +363,33 @@ def _save_upload(upload: UploadFile, dst: Path) -> None:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
 
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+class FrontendFiles(StaticFiles):
+    """Static files with cache headers that suit a Vite build.
+
+    Files under ``assets/`` have content hashes in their names and never
+    change, so browsers may keep them for a year. Everything else, notably
+    ``index.html``, must be revalidated so a new deploy shows up at once.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            response.headers["Cache-Control"] = (
+                IMMUTABLE if path.startswith("assets/") else "no-cache"
+            )
+        return response
+
+
 def mount_frontend(target: FastAPI, directory: Path | None) -> None:
     """Serve the built web UI from ``directory`` at ``/``, after the API routes."""
     if directory is None:
         return
     if not directory.is_dir():
         raise RuntimeError(f"FRONTEND_DIR {directory} is not a directory")
-    target.mount("/", StaticFiles(directory=directory, html=True), name="frontend")
+    target.mount("/", FrontendFiles(directory=directory, html=True), name="frontend")
 
 
 mount_frontend(app, settings.frontend_dir)
