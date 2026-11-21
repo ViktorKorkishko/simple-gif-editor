@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatTime } from "./format";
+import { formatBytes, formatTime, formatTimecode } from "./format";
 
 describe("formatBytes", () => {
   it("picks a readable unit", () => {
@@ -16,5 +16,15 @@ describe("formatTime", () => {
     expect(formatTime(0)).toBe("0:00.0");
     expect(formatTime(75.25)).toBe("1:15.3");
     expect(formatTime(59.97)).toBe("1:00.0");
+  });
+});
+
+describe("formatTimecode", () => {
+  it("pads minutes and keeps hundredths", () => {
+    expect(formatTimecode(0)).toBe("00:00.00");
+    expect(formatTimecode(12)).toBe("00:12.00");
+    expect(formatTimecode(75.256)).toBe("01:15.26");
+    expect(formatTimecode(59.999)).toBe("01:00.00");
+    expect(formatTimecode(-3)).toBe("00:00.00");
   });
 });
