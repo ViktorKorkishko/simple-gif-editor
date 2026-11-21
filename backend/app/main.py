@@ -35,6 +35,7 @@ from app.estimate import (
     estimate_size,
     fit_to_target,
 )
+from app.limits import FORM_OVERHEAD_BYTES, BodySizeLimitMiddleware
 from app.overlay import (
     MAX_FONT_SIZE,
     MAX_OFFSET,
@@ -47,6 +48,10 @@ from app.overlay import (
 from app.probe import ProbeError, probe_duration
 
 app = FastAPI(title="Simple GIF Editor", version="0.1.0")
+app.add_middleware(
+    BodySizeLimitMiddleware,
+    max_bytes=lambda: settings.max_upload_bytes + FORM_OVERHEAD_BYTES,
+)
 
 CHUNK = 1024 * 1024
 MIN_TARGET_KB = 10
